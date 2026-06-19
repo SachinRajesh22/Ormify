@@ -10,3 +10,30 @@ frontend/.env.local
 
 # Backend
 backend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.venv/
+
+# Node.js
+node_modules/
+.next/
+out/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Build files
+dist/
+build/
