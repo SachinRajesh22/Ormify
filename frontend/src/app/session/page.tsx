@@ -1,0 +1,655 @@
+"use client"
+
+import { useState, useRef, createContext, useContext } from "react"
+import { useRouter } from "next/navigation"
+import { useTheme } from "../../lib/theme"
+import { ThemeToggle } from "../../components/ThemeToggle"
+
+// ── Color tokens ──────────────────────────────────────────────
+const C_DARK = {
+  bg:        "#0D0D0F",
+  card:      "#141416",
+  surface:   "#111113",
+  border:    "rgba(255,255,255,0.06)",
+  text:      "#EEEEF2",
+  muted:     "#8A8A9A",
+  hint:      "#6B6B80",
+  violet:    "#7B61FF",
+  teal:      "#10CFA8",
+  amber:     "#F59E0B",
+  red:       "#EF4444",
+}
+
+const C_LIGHT = {
+  bg:        "#FAFAFA",
+  card:      "#FFFFFF",
+  surface:   "#F4F4F5",
+  border:    "rgba(0,0,0,0.08)",
+  text:      "#18181B",
+  muted:     "#71717A",
+  hint:      "#A1A1AA",
+  violet:    "#7B61FF",
+  teal:      "#0E9E81",
+  amber:     "#D97706",
+  red:       "#DC2626",
+}
+
+type ColorScheme = typeof C_DARK
+const ThemeColors = createContext<ColorScheme>(C_DARK)
+function useColors() { return useContext(ThemeColors) }
+
+// ── Types ─────────────────────────────────────────────────────
+type Step = 1 | 2 | 3
+type Feasibility = "tight" | "manageable" | "comfortable" | null
+
+interface Topic {
+  id:             string
+  name:           string
+  estimatedHours: number
+}
+
+// ── Dummy extracted topics (simulates Claude API response) ────
+const DUMMY_EXTRACTED: Topic[] = [
+  { id: "t1",  name: "Arrays & Strings",        estimatedHours: 2   },
+  { id: "t2",  name: "Linked Lists",             estimatedHours: 1.5 },
+  { id: "t3",  name: "Stacks & Queues",          estimatedHours: 1.5 },
+  { id: "t4",  name: "Trees & BST",              estimatedHours: 3   },
+  { id: "t5",  name: "Graphs & BFS/DFS",         estimatedHours: 3   },
+  { id: "t6",  name: "Dynamic Programming",      estimatedHours: 4   },
+  { id: "t7",  name: "Recursion & Backtracking", estimatedHours: 2   },
+  { id: "t8",  name: "Sorting Algorithms",       estimatedHours: 1.5 },
+  { id: "t9",  name: "Binary Search",            estimatedHours: 1   },
+  { id: "t10", name: "Heaps & Priority Queues",  estimatedHours: 2   },
+  { id: "t11", name: "Hash Maps & Sets",         estimatedHours: 1.5 },
+  { id: "t12", name: "Tries",                    estimatedHours: 1.5 },
+]
+
+// ── Helpers ───────────────────────────────────────────────────
+function uid() {
+  return Math.random().toString(36).slice(2, 8)
+}
+
+function computeFeasibility(topics: Topic[], deadline: string): Feasibility {
+  if (!deadline || topics.length === 0) return null
+  const daysLeft   = (new Date(deadline).getTime() - Date.now()) / 86_400_000
+  const totalHours = topics.reduce((a, t) => a + t.estimatedHours, 0)
+  const available  = daysLeft * 6
+  const ratio      = available / totalHours
+  if (ratio < 0.85) return "tight"
+  if (ratio < 1.5)  return "manageable"
+  return "comfortable"
+}
+
+// ── Sub-components ────────────────────────────────────────────
+function StepIndicator({ current }: { current: Step }) {
+  const C = useColors()
+  const steps = [
+    { n: 1 as Step, label: "Name" },
+    { n: 2 as Step, label: "Topics" },
+    { n: 3 as Step, label: "Deadline" },
+  ]
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: "2rem" }}>
+      {steps.map((s, i) => (
+        <div key={s.n} style={{ display: "flex", alignItems: "center" }}>
+          {i > 0 && (
+            <div style={{
+              width: 40, height: 1,
+              background: current > s.n - 1 ? C.violet : C.border,
+              transition: "background 0.2s",
+            }} />
+          )}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: "50%", display: "flex",
+              alignItems: "center", justifyContent: "center",
+              fontSize: 12, fontWeight: 600,
+              background: current === s.n
+                ? C.violet
+                : current > s.n
+                  ? C.violet + "40"
+                  : C.surface,
+              color: current >= s.n ? "#fff" : C.hint,
+              border: `1px solid ${current >= s.n ? C.violet : C.border}`,
+              transition: "all 0.2s",
+            }}>
+              {current > s.n ? "✓" : s.n}
+            </div>
+            <span style={{
+              fontSize: 10, color: current >= s.n ? C.muted : C.hint,
+              textTransform: "uppercase", letterSpacing: "0.06em",
+            }}>
+              {s.label}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  const C = useColors()
+  return (
+    <label style={{
+      fontSize: 11, color: C.muted, display: "block", marginBottom: 7,
+      textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 500,
+    }}>
+      {children}
+    </label>
+  )
+}
+
+function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  const C = useColors()
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`,
+      borderRadius: 12, padding: "1.25rem", ...style,
+    }}>
+      {children}
+    </div>
+  )
+}
+
+// ── Step 1: Name ──────────────────────────────────────────────
+function Step1({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const C = useColors()
+  return (
+    <Card>
+      <FieldLabel>Session name</FieldLabel>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="e.g. DSA Exam, OS Mid Sem, GATE 2027 …"
+        autoFocus
+        style={{
+          width: "100%", background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: 8, padding: "10px 14px", fontSize: 14,
+          color: C.text, outline: "none", boxSizing: "border-box",
+        }}
+        onFocus={e => (e.target.style.borderColor = C.violet)}
+        onBlur={e  => (e.target.style.borderColor = C.border)}
+      />
+      <p style={{ fontSize: 11, color: C.hint, margin: "10px 0 0" }}>
+        This is just a label — you can rename it later.
+      </p>
+    </Card>
+  )
+}
+
+// ── Step 2: Topics ────────────────────────────────────────────
+function Step2({
+  topics, setTopics, uploading, setUploading, fileName, setFileName,
+}: {
+  topics:       Topic[]
+  setTopics:    (t: Topic[]) => void
+  uploading:    boolean
+  setUploading: (v: boolean) => void
+  fileName:     string | null
+  setFileName:  (v: string | null) => void
+}) {
+  const C = useColors()
+  const [manualText, setManualText] = useState("")
+  const [dragOver,   setDragOver]   = useState(false)
+  const [dragIndex,  setDragIndex]  = useState<number | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const simulateUpload = (name: string) => {
+    setFileName(name)
+    setUploading(true)
+    setTopics([])
+    setTimeout(() => {
+      setUploading(false)
+      setTopics(DUMMY_EXTRACTED)
+    }, 2200)
+  }
+
+  const handleFile = (file: File) => {
+    if (file.type !== "application/pdf") return
+    simulateUpload(file.name)
+  }
+
+  const parseManual = () => {
+    const lines = manualText.split("\n").map(l => l.trim()).filter(Boolean)
+    setTopics(lines.map(name => ({ id: uid(), name, estimatedHours: 1.5 })))
+  }
+
+  const onDragStart = (i: number) => setDragIndex(i)
+  const onDragOver  = (e: React.DragEvent, i: number) => {
+    e.preventDefault()
+    if (dragIndex === null || dragIndex === i) return
+    const arr = [...topics]
+    const [item] = arr.splice(dragIndex, 1)
+    arr.splice(i, 0, item)
+    setTopics(arr)
+    setDragIndex(i)
+  }
+  const onDragEnd = () => setDragIndex(null)
+
+  const updateName  = (id: string, name: string) =>
+    setTopics(topics.map(t => t.id === id ? { ...t, name } : t))
+  const updateHours = (id: string, h: number) =>
+    setTopics(topics.map(t => t.id === id ? { ...t, estimatedHours: h } : t))
+  const remove      = (id: string) => setTopics(topics.filter(t => t.id !== id))
+  const addEmpty    = () => setTopics([...topics, { id: uid(), name: "", estimatedHours: 1.5 }])
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+
+        {/* PDF upload */}
+        <Card>
+          <FieldLabel>Upload syllabus PDF</FieldLabel>
+          <div
+            onClick={() => fileRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
+            style={{
+              border: `1.5px dashed ${dragOver ? C.violet : C.border}`,
+              borderRadius: 9, padding: "1.5rem 1rem",
+              textAlign: "center", cursor: "pointer",
+              background: dragOver ? C.violet + "08" : C.surface,
+              transition: "all 0.15s",
+            }}
+          >
+            <div style={{ fontSize: 22, marginBottom: 6 }}>📄</div>
+            <p style={{ fontSize: 12, color: C.muted, margin: "0 0 4px" }}>
+              {fileName ? fileName : "Drop PDF here or click to browse"}
+            </p>
+            <p style={{ fontSize: 10, color: C.hint, margin: 0 }}>Syllabus, notes, or any PDF</p>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf"
+            style={{ display: "none" }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
+          />
+          {uploading && (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{
+                  width: 14, height: 14, borderRadius: "50%",
+                  border: `2px solid ${C.violet}`, borderTopColor: "transparent",
+                  animation: "spin 0.8s linear infinite",
+                }} />
+                <span style={{ fontSize: 11, color: C.muted }}>Extracting topics from PDF…</span>
+              </div>
+              <div style={{ fontSize: 10, color: C.hint }}>PyMuPDF → Claude API → topic list</div>
+            </div>
+          )}
+        </Card>
+
+        {/* Manual paste */}
+        <Card>
+          <FieldLabel>Paste topics manually</FieldLabel>
+          <textarea
+            value={manualText}
+            onChange={e => setManualText(e.target.value)}
+            placeholder={"Arrays & Strings\nLinked Lists\nTrees & BST\nDynamic Programming\n…"}
+            rows={5}
+            style={{
+              width: "100%", background: C.surface,
+              border: `1px solid ${C.border}`, borderRadius: 8,
+              padding: "10px 12px", fontSize: 12, color: C.text,
+              resize: "none", outline: "none", boxSizing: "border-box",
+              fontFamily: "monospace", lineHeight: 1.7,
+            }}
+            onFocus={e => (e.target.style.borderColor = C.violet)}
+            onBlur={e  => (e.target.style.borderColor = C.border)}
+          />
+          <button
+            onClick={parseManual}
+            disabled={!manualText.trim()}
+            style={{
+              marginTop: 10, width: "100%", padding: "8px",
+              fontSize: 12, fontWeight: 500, cursor: "pointer",
+              borderRadius: 7, border: `1px solid ${C.border}`,
+              background: manualText.trim() ? C.violet + "20" : "transparent",
+              color: manualText.trim() ? C.violet : C.hint,
+              transition: "all 0.15s",
+            }}
+          >
+            Parse topics →
+          </button>
+        </Card>
+      </div>
+
+      {/* Topic list */}
+      {topics.length > 0 && !uploading && (
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <FieldLabel>{topics.length} topics — drag to reorder</FieldLabel>
+            <button
+              onClick={addEmpty}
+              style={{ fontSize: 11, color: C.violet, background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            >
+              + Add topic
+            </button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {topics.map((t, i) => (
+              <div
+                key={t.id}
+                draggable
+                onDragStart={() => onDragStart(i)}
+                onDragOver={e => onDragOver(e, i)}
+                onDragEnd={onDragEnd}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "7px 10px", borderRadius: 8,
+                  background: dragIndex === i ? C.violet + "12" : C.surface,
+                  border: `1px solid ${dragIndex === i ? C.violet + "44" : C.border}`,
+                  cursor: "grab", transition: "all 0.1s",
+                }}
+              >
+                <span style={{ color: C.hint, fontSize: 12, cursor: "grab", flexShrink: 0 }}>⋮⋮</span>
+                <span style={{ fontSize: 10, color: C.hint, fontFamily: "monospace", width: 18, flexShrink: 0 }}>
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <input
+                  value={t.name}
+                  onChange={e => updateName(t.id, e.target.value)}
+                  style={{
+                    flex: 1, background: "transparent", border: "none",
+                    color: C.text, fontSize: 13, outline: "none", minWidth: 0,
+                  }}
+                  placeholder="Topic name"
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                  <input
+                    type="number"
+                    value={t.estimatedHours}
+                    onChange={e => updateHours(t.id, parseFloat(e.target.value) || 0)}
+                    min={0.5} max={20} step={0.5}
+                    style={{
+                      width: 40, background: "transparent", border: `1px solid ${C.border}`,
+                      borderRadius: 5, padding: "2px 6px", fontSize: 11,
+                      color: C.muted, textAlign: "center", outline: "none",
+                    }}
+                  />
+                  <span style={{ fontSize: 10, color: C.hint }}>h</span>
+                </div>
+                <button
+                  onClick={() => remove(t.id)}
+                  style={{ color: C.hint, background: "none", border: "none", cursor: "pointer", fontSize: 14, padding: "0 2px", flexShrink: 0 }}
+                  onMouseEnter={e => (e.currentTarget.style.color = C.red)}
+                  onMouseLeave={e => (e.currentTarget.style.color = C.hint)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 10, color: C.hint, margin: "10px 0 0" }}>
+            Total estimated: {topics.reduce((a, t) => a + t.estimatedHours, 0).toFixed(1)} hours
+          </p>
+        </Card>
+      )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  )
+}
+
+// ── Step 3: Deadline ──────────────────────────────────────────
+function Step3({
+  topics, deadline, setDeadline, feasibility, setFeasibility,
+}: {
+  topics:         Topic[]
+  deadline:       string
+  setDeadline:    (v: string) => void
+  feasibility:    Feasibility
+  setFeasibility: (v: Feasibility) => void
+}) {
+  const C = useColors()
+  const totalHours = topics.reduce((a, t) => a + t.estimatedHours, 0)
+  const daysLeft   = deadline
+    ? Math.max(0, Math.ceil((new Date(deadline).getTime() - Date.now()) / 86_400_000))
+    : null
+
+  const feasibilityConfig: Record<NonNullable<Feasibility>, { label: string; color: string; bg: string; icon: string }> = {
+    tight:       { label: "Tight",       color: C.red,   bg: C.red   + "18", icon: "⚠" },
+    manageable:  { label: "Manageable",  color: C.amber, bg: C.amber + "18", icon: "⚡" },
+    comfortable: { label: "Comfortable", color: C.teal,  bg: C.teal  + "18", icon: "✓" },
+  }
+
+  const onDeadlineChange = (v: string) => {
+    setDeadline(v)
+    setFeasibility(computeFeasibility(topics, v))
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Card>
+        <FieldLabel>Exam or submission deadline</FieldLabel>
+        <input
+          type="datetime-local"
+          value={deadline}
+          onChange={e => onDeadlineChange(e.target.value)}
+          style={{
+            width: "100%", background: C.surface,
+            border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: "10px 14px", fontSize: 13, color: C.text,
+            outline: "none", boxSizing: "border-box",
+          }}
+          onFocus={e => (e.target.style.borderColor = C.violet)}
+          onBlur={e  => (e.target.style.borderColor = C.border)}
+        />
+      </Card>
+
+      {feasibility && deadline && (
+        <div style={{
+          background: feasibilityConfig[feasibility].bg,
+          border: `1px solid ${feasibilityConfig[feasibility].color}44`,
+          borderRadius: 10, padding: "1rem 1.125rem",
+        }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: feasibilityConfig[feasibility].color, marginBottom: 5 }}>
+            {feasibilityConfig[feasibility].icon} {feasibilityConfig[feasibility].label} timeline
+          </div>
+          <p style={{ fontSize: 12, color: C.text, margin: 0, lineHeight: 1.65 }}>
+            You have <strong style={{ color: C.text }}>{topics.length} topics</strong> ({totalHours.toFixed(1)}h estimated)
+            and <strong style={{ color: C.text }}>{daysLeft} day{daysLeft !== 1 ? "s" : ""}</strong> until your deadline.
+            {feasibility === "tight" && " This is very tight — you'll need to prioritise ruthlessly or defer some topics."}
+            {feasibility === "manageable" && " This is achievable if you're consistent. Stick to the suggested order below."}
+            {feasibility === "comfortable" && " You have enough time. Use it for depth — don't just rush through topics."}
+          </p>
+        </div>
+      )}
+
+      {topics.length > 0 && deadline && (
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <FieldLabel>Suggested priority order</FieldLabel>
+            <span style={{ fontSize: 10, color: C.hint }}>by estimated complexity</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            {[...topics]
+              .sort((a, b) => b.estimatedHours - a.estimatedHours)
+              .map((t, i) => (
+                <div
+                  key={t.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "9px 4px",
+                    borderBottom: i < topics.length - 1 ? `1px solid ${C.border}` : "none",
+                  }}
+                >
+                  <span style={{ fontFamily: "monospace", fontSize: 11, color: C.hint, width: 20, flexShrink: 0 }}>
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span style={{ flex: 1, fontSize: 13, color: C.text }}>{t.name}</span>
+                  <span style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>
+                    ~{t.estimatedHours}h
+                  </span>
+                  <div style={{ width: 50, height: 3, background: C.border, borderRadius: 99 }}>
+                    <div style={{
+                      height: "100%",
+                      width: `${(t.estimatedHours / Math.max(...topics.map(x => x.estimatedHours))) * 100}%`,
+                      background: C.violet, borderRadius: 99,
+                    }} />
+                  </div>
+                </div>
+              ))}
+          </div>
+          <p style={{ fontSize: 10, color: C.hint, margin: "10px 0 0" }}>
+            Ormify sorts by estimated time. You can reorder these in Step 2 before starting.
+          </p>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────
+export default function NewSessionPage() {
+  const router = useRouter()
+  const { theme } = useTheme()
+  const C = theme === "dark" ? C_DARK : C_LIGHT
+
+  const [step,        setStep]        = useState<Step>(1)
+  const [sessionName, setSessionName] = useState("")
+  const [topics,      setTopics]      = useState<Topic[]>([])
+  const [uploading,   setUploading]   = useState(false)
+  const [fileName,    setFileName]    = useState<string | null>(null)
+  const [deadline,    setDeadline]    = useState("")
+  const [feasibility, setFeasibility] = useState<Feasibility>(null)
+  const [submitting,  setSubmitting]  = useState(false)
+
+  const canProceed =
+    step === 1 ? sessionName.trim().length > 0 :
+    step === 2 ? topics.length > 0 && !uploading :
+    deadline.length > 0
+
+  const handleBack = () => setStep(s => Math.max(1, s - 1) as Step)
+
+  const handleNext = () => {
+    if (step < 3) {
+      setStep(s => (s + 1) as Step)
+    } else {
+      setSubmitting(true)
+      setTimeout(() => {
+        setSubmitting(false)
+        router.push("/study/s_new")
+      }, 900)
+    }
+  }
+
+  const stepLabels: Record<Step, string> = {
+    1: "Name your session",
+    2: "Add topics",
+    3: "Set your deadline",
+  }
+
+  return (
+    <ThemeColors.Provider value={C}>
+      <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+
+        {/* ── Top bar ── */}
+        <header style={{
+          borderBottom: `1px solid ${C.border}`, padding: "0 2rem",
+          height: 56, display: "flex", alignItems: "center", justifyContent: "space-between",
+          position: "sticky", top: 0, background: C.bg, zIndex: 50,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: 8, background: C.violet,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 13, fontWeight: 700, color: "#fff",
+            }}>O</div>
+            <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em", color: C.text }}>Ormify</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <ThemeToggle />
+            <button
+              onClick={() => router.push("/dashboard")}
+              style={{
+                fontSize: 12, color: C.muted, background: "none",
+                border: `1px solid ${C.border}`, borderRadius: 6,
+                padding: "4px 12px", cursor: "pointer",
+              }}
+            >
+              ← Back to dashboard
+            </button>
+          </div>
+        </header>
+
+        {/* ── Main ── */}
+        <main style={{ maxWidth: 620, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
+
+          <div style={{ marginBottom: "2rem" }}>
+            <h1 style={{ fontSize: 21, fontWeight: 700, margin: "0 0 5px", letterSpacing: "-0.025em", color: C.text }}>
+              New session
+            </h1>
+            <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>
+              {stepLabels[step]}
+            </p>
+          </div>
+
+          <StepIndicator current={step} />
+
+          {step === 1 && <Step1 value={sessionName} onChange={setSessionName} />}
+          {step === 2 && (
+            <Step2
+              topics={topics}
+              setTopics={setTopics}
+              uploading={uploading}
+              setUploading={setUploading}
+              fileName={fileName}
+              setFileName={setFileName}
+            />
+          )}
+          {step === 3 && (
+            <Step3
+              topics={topics}
+              deadline={deadline}
+              setDeadline={setDeadline}
+              feasibility={feasibility}
+              setFeasibility={setFeasibility}
+            />
+          )}
+
+          {/* ── Navigation ── */}
+          <div style={{ display: "flex", gap: 10, marginTop: "1.5rem" }}>
+            {step > 1 && (
+              <button
+                onClick={handleBack}
+                style={{
+                  flex: 1, padding: "11px", fontSize: 13,
+                  cursor: "pointer", borderRadius: 9,
+                  border: `1px solid ${C.border}`,
+                  background: "transparent", color: C.muted,
+                }}
+              >
+                ← Back
+              </button>
+            )}
+            <button
+              onClick={handleNext}
+              disabled={!canProceed || submitting}
+              style={{
+                flex: 2, padding: "11px", fontSize: 13, fontWeight: 600,
+                cursor: canProceed ? "pointer" : "not-allowed",
+                borderRadius: 9, border: "none",
+                background: canProceed ? C.violet : C.hint,
+                color: "#fff", letterSpacing: "-0.01em",
+                opacity: submitting ? 0.7 : 1,
+                transition: "all 0.15s",
+              }}
+            >
+              {submitting ? "Creating session…" : step === 3 ? "Start session →" : "Continue →"}
+            </button>
+          </div>
+
+          {step === 2 && topics.length === 0 && !uploading && (
+            <p style={{ fontSize: 11, color: C.hint, textAlign: "center", marginTop: 12 }}>
+              Upload a PDF or paste topics manually to continue
+            </p>
+          )}
+        </main>
+      </div>
+    </ThemeColors.Provider>
+  )
+}
