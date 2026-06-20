@@ -1,24 +1,19 @@
 "use client"
 
-import { useState,useEffect } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "../../lib/supabase"
+import { ThemeToggle } from "../../components/ThemeToggle"
+import { useTheme } from "../../lib/theme"
 
-// ── Color tokens ──────────────────────────────────────────────
-const C = {
-  bg:        "#0D0D0F",
-  card:      "#141416",
-  cardHov:   "#1A1A1E",
-  surface:   "#111113",
-  border:    "rgba(255,255,255,0.06)",
-  borderHov: "rgba(255,255,255,0.11)",
-  text:      "#EEEEF2",
-  muted:     "#8A8A9A",
-  hint:      "#4A4A5A",
-  violet:    "#7B61FF",
-  teal:      "#10CFA8",
-  amber:     "#F59E0B",
-  red:       "#EF4444",
+// Hex values used only in SVG elements and dynamic inline styles (where Tailwind classes can't reach)
+const COLORS = {
+  violet: "#7B61FF",
+  teal:   "#10CFA8",
+  amber:  "#F59E0B",
+  red:    "#EF4444",
+  muted:  "#8A8A9A",
+  hint:   "#4A4A5A",
 }
 
 // ── Types ─────────────────────────────────────────────────────
@@ -65,12 +60,12 @@ const SESSIONS: StudySession[] = [
 ]
 
 const PACE_DATA: PacePoint[] = [
-  { topic: "Arrays",   ratio: 1.25 },
-  { topic: "Lists",    ratio: 1.2  },
-  { topic: "Sorting",  ratio: 0.85 },
-  { topic: "BST",      ratio: 1.6  },
-  { topic: "Graphs",   ratio: 1.3  },
-  { topic: "DP",       ratio: 1.8  },
+  { topic: "Arrays",  ratio: 1.25 },
+  { topic: "Lists",   ratio: 1.2  },
+  { topic: "Sorting", ratio: 0.85 },
+  { topic: "BST",     ratio: 1.6  },
+  { topic: "Graphs",  ratio: 1.3  },
+  { topic: "DP",      ratio: 1.8  },
 ]
 
 const DEFER_DATA: DeferPoint[] = [
@@ -90,17 +85,15 @@ const DEPTH_DATA: DepthPoint[] = [
   { topic: "Queues",  score: 75 },
 ]
 
-// ── Helper: score color ───────────────────────────────────────
-const scoreColor = (n: number) =>
-  n >= 70 ? C.teal : n >= 50 ? C.amber : n > 0 ? C.red : C.hint
+function scoreColor(n: number): string {
+  return n >= 70 ? COLORS.teal : n >= 50 ? COLORS.amber : n > 0 ? COLORS.red : COLORS.hint
+}
 
 // ── Sub-components ────────────────────────────────────────────
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p style={{
-      fontSize: 10, color: C.muted, margin: "0 0 12px",
-      textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 500,
-    }}>
+    <p className="text-[10px] text-stone-500 dark:text-[#8A8A9A] uppercase tracking-[0.08em] font-medium mb-3 m-0">
       {children}
     </p>
   )
@@ -112,18 +105,15 @@ function StatCard({
   label: string; value: string; color: string; sub?: string
 }) {
   return (
-    <div style={{
-      background: C.card, border: `1px solid ${C.border}`,
-      borderRadius: 12, padding: "1rem 1.25rem",
-    }}>
-      <p style={{ fontSize: 10, color: C.muted, margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+    <div className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-4">
+      <p className="text-[10px] text-stone-500 dark:text-[#8A8A9A] uppercase tracking-[0.07em] font-medium mb-2 m-0">
         {label}
       </p>
-      <p style={{ fontFamily: "monospace", fontSize: 26, fontWeight: 700, color, margin: 0, letterSpacing: "-0.02em" }}>
+      <p className="font-mono text-[26px] font-bold tracking-tight m-0" style={{ color }}>
         {value}
       </p>
       {sub && (
-        <p style={{ fontSize: 11, color: C.hint, margin: "5px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <p className="text-[11px] text-stone-500 dark:text-[#6B6B80] mt-1 m-0 overflow-hidden text-ellipsis whitespace-nowrap">
           {sub}
         </p>
       )}
@@ -133,16 +123,16 @@ function StatCard({
 
 function StatusBadge({ status }: { status: SessionStatus }) {
   const map: Record<SessionStatus, { label: string; color: string }> = {
-    active:    { label: "Active",    color: C.violet },
-    upcoming:  { label: "Upcoming",  color: C.teal   },
-    completed: { label: "Completed", color: C.muted  },
+    active:    { label: "Active",    color: COLORS.violet },
+    upcoming:  { label: "Upcoming",  color: COLORS.teal   },
+    completed: { label: "Completed", color: COLORS.muted  },
   }
   const { label, color } = map[status]
   return (
-    <span style={{
-      fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 99,
-      background: color + "22", color, letterSpacing: "0.04em",
-    }}>
+    <span
+      className="text-[10px] font-semibold px-2 py-0.5 rounded-full tracking-[0.04em]"
+      style={{ background: color + "22", color }}
+    >
       {label}
     </span>
   )
@@ -153,7 +143,6 @@ function SessionCard({
 }: {
   session: StudySession; onClick: () => void
 }) {
-  const [hov, setHov] = useState(false)
   const pct  = Math.round((session.topicsDone / session.topicsTotal) * 100) || 0
   const col  = scoreColor(session.readiness)
   const days = Math.max(0, Math.ceil((new Date(session.deadline).getTime() - Date.now()) / 86_400_000))
@@ -161,61 +150,54 @@ function SessionCard({
   return (
     <div
       onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        background: hov ? C.cardHov : C.card,
-        border: `1px solid ${hov ? C.borderHov : C.border}`,
-        borderRadius: 12, padding: "1.125rem 1.25rem",
-        cursor: "pointer", transition: "background 0.12s, border-color 0.12s",
-      }}
+      className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem] cursor-pointer transition-colors hover:bg-stone-50 dark:hover:bg-[#1A1A1E] hover:border-stone-300 dark:hover:border-white/[0.11]"
     >
       {/* Top row */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+      <div className="flex justify-between items-start mb-3.5">
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-            <span style={{ fontWeight: 600, fontSize: 14, color: C.text }}>{session.name}</span>
+          <div className="flex items-center gap-2 mb-[5px]">
+            <span className="font-semibold text-sm text-stone-900 dark:text-[#EEEEF2]">{session.name}</span>
             <StatusBadge status={session.status} />
           </div>
-          <p style={{ fontSize: 11, color: C.muted, margin: 0 }}>
+          <p className="text-[11px] text-stone-500 dark:text-[#8A8A9A] m-0">
             {session.topicsTotal} topics
             {session.status !== "completed"
               ? ` · ${days}d left · due ${new Date(session.deadline).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
               : " · Completed"}
           </p>
         </div>
-        <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
-          <div style={{ fontFamily: "monospace", fontSize: 22, fontWeight: 700, color: col, letterSpacing: "-0.02em" }}>
+        <div className="text-right flex-shrink-0 ml-3">
+          <div className="font-mono text-[22px] font-bold tracking-tight leading-none" style={{ color: col }}>
             {session.readiness}%
           </div>
-          <div style={{ fontSize: 9, color: C.hint, textTransform: "uppercase", letterSpacing: "0.05em" }}>readiness</div>
+          <div className="text-[9px] text-stone-500 dark:text-[#6B6B80] uppercase tracking-[0.05em] mt-0.5">readiness</div>
         </div>
       </div>
 
       {/* Progress bar */}
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-          <span style={{ fontSize: 10, color: C.hint }}>{session.topicsDone}/{session.topicsTotal} topics</span>
-          <span style={{ fontSize: 10, color: C.hint }}>{pct}%</span>
+      <div className="mb-2.5">
+        <div className="flex justify-between mb-1.5">
+          <span className="text-[10px] text-stone-500 dark:text-[#6B6B80]">{session.topicsDone}/{session.topicsTotal} topics</span>
+          <span className="text-[10px] text-stone-500 dark:text-[#6B6B80]">{pct}%</span>
         </div>
-        <div style={{ height: 3, background: "rgba(255,255,255,0.05)", borderRadius: 99, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${pct}%`, background: col, borderRadius: 99 }} />
+        <div className="h-[3px] bg-stone-200 dark:bg-white/[0.05] rounded-full overflow-hidden">
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: col }} />
         </div>
       </div>
 
-      {/* Most deferred */}
       {session.mostDeferred && (
-        <p style={{ fontSize: 10, color: C.hint, margin: 0 }}>
+        <p className="text-[10px] text-stone-500 dark:text-[#6B6B80] m-0">
           Most deferred:{" "}
-          <span style={{ color: C.amber }}>{session.mostDeferred}</span>
+          <span style={{ color: COLORS.amber }}>{session.mostDeferred}</span>
         </p>
       )}
     </div>
   )
 }
 
-// ── SVG Pace line chart ───────────────────────────────────────
-function PaceLineChart({ data }: { data: PacePoint[] }) {
+// ── SVG charts (inline styles required for SVG fill/stroke attributes) ────
+
+function PaceLineChart({ data, isDark }: { data: PacePoint[]; isDark: boolean }) {
   const W = 480, H = 130
   const PAD = { t: 12, r: 20, b: 32, l: 36 }
   const iW  = W - PAD.l - PAD.r
@@ -226,67 +208,68 @@ function PaceLineChart({ data }: { data: PacePoint[] }) {
   const y = (v: number) => PAD.t + ((maxV - v) / (maxV - minV)) * iH
   const pts = data.map((d, i) => `${x(i).toFixed(1)},${y(d.ratio).toFixed(1)}`).join(" ")
   const refY = y(1)
+  const gridStroke = isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)"
+  const labelFill  = isDark ? COLORS.hint  : "#A1A1AA"
+  const mutedFill  = isDark ? COLORS.muted : "#71717A"
 
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block", overflow: "visible" }}>
-      {/* Grid lines */}
       {[0.5, 1.0, 1.5, 2.0].map(v => (
         <line key={v} x1={PAD.l} y1={y(v)} x2={W - PAD.r} y2={y(v)}
-          stroke="rgba(255,255,255,0.04)" strokeWidth={1} />
+          stroke={gridStroke} strokeWidth={1} />
       ))}
-      {/* Reference line at 1.0 */}
       <line x1={PAD.l} y1={refY} x2={W - PAD.r} y2={refY}
-        stroke={C.teal} strokeWidth={1} strokeDasharray="4 3" opacity={0.5} />
-      <text x={PAD.l - 4} y={refY + 4} textAnchor="end" fontSize={8} fill={C.muted}>1.0×</text>
-      {/* Y axis labels */}
+        stroke={COLORS.teal} strokeWidth={1} strokeDasharray="4 3" opacity={0.5} />
+      <text x={PAD.l - 4} y={refY + 4} textAnchor="end" fontSize={8} fill={mutedFill}>1.0×</text>
       {[0, 0.5, 1.5, 2.0].map(v => (
-        <text key={v} x={PAD.l - 4} y={y(v) + 4} textAnchor="end" fontSize={8} fill={C.hint}>{v}</text>
+        <text key={v} x={PAD.l - 4} y={y(v) + 4} textAnchor="end" fontSize={8} fill={labelFill}>{v}</text>
       ))}
-      {/* Line */}
-      <polyline points={pts} fill="none" stroke={C.violet} strokeWidth={1.8} strokeLinejoin="round" />
-      {/* Dots + labels */}
+      <polyline points={pts} fill="none" stroke={COLORS.violet} strokeWidth={1.8} strokeLinejoin="round" />
       {data.map((d, i) => (
         <g key={i}>
-          <circle cx={x(i)} cy={y(d.ratio)} r={3.5} fill={C.violet} />
-          <circle cx={x(i)} cy={y(d.ratio)} r={6}   fill={C.violet} opacity={0.15} />
-          <text x={x(i)} y={H - 8} textAnchor="middle" fontSize={9} fill={C.hint}>{d.topic}</text>
+          <circle cx={x(i)} cy={y(d.ratio)} r={3.5} fill={COLORS.violet} />
+          <circle cx={x(i)} cy={y(d.ratio)} r={6}   fill={COLORS.violet} opacity={0.15} />
+          <text x={x(i)} y={H - 8} textAnchor="middle" fontSize={9} fill={labelFill}>{d.topic}</text>
         </g>
       ))}
     </svg>
   )
 }
 
-// ── Horizontal bar chart ──────────────────────────────────────
-function HBarChart({ data, color }: { data: DeferPoint[]; color: string }) {
-  const max = Math.max(...data.map(d => d.count))
+function HBarChart({ data, color, isDark }: { data: DeferPoint[]; color: string; isDark: boolean }) {
+  const max      = Math.max(...data.map(d => d.count))
+  const barBg    = isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.06)"
+  const textMuted = isDark ? COLORS.muted : "#71717A"
+  const textHint  = isDark ? COLORS.hint  : "#A1A1AA"
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {data.map((d, i) => (
         <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ width: 130, fontSize: 11, color: C.muted, textAlign: "right", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ width: 130, fontSize: 11, color: textMuted, textAlign: "right", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {d.topic}
           </span>
-          <div style={{ flex: 1, height: 9, background: "rgba(255,255,255,0.05)", borderRadius: 99, overflow: "hidden" }}>
+          <div style={{ flex: 1, height: 9, background: barBg, borderRadius: 99, overflow: "hidden" }}>
             <div style={{ height: "100%", width: `${(d.count / max) * 100}%`, background: color, borderRadius: 99, transition: "width 0.6s ease" }} />
           </div>
-          <span style={{ fontSize: 10, color: C.hint, width: 14, flexShrink: 0, fontFamily: "monospace" }}>{d.count}</span>
+          <span style={{ fontSize: 10, color: textHint, width: 14, flexShrink: 0, fontFamily: "monospace" }}>{d.count}</span>
         </div>
       ))}
     </div>
   )
 }
 
-// ── Vertical bar chart ────────────────────────────────────────
-function VBarChart({ data }: { data: DepthPoint[] }) {
+function VBarChart({ data, isDark }: { data: DepthPoint[]; isDark: boolean }) {
+  const textHint = isDark ? COLORS.hint : "#A1A1AA"
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 110, paddingTop: 20 }}>
       {data.map((d, i) => {
-        const col = d.score >= 70 ? C.teal : d.score >= 50 ? C.amber : C.red
+        const col = d.score >= 70 ? COLORS.teal : d.score >= 50 ? COLORS.amber : COLORS.red
         return (
           <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, height: "100%", justifyContent: "flex-end" }}>
             <span style={{ fontSize: 9, color: col, fontFamily: "monospace", fontWeight: 600 }}>{d.score}</span>
             <div style={{ width: "100%", height: `${d.score}%`, background: col, borderRadius: "3px 3px 0 0", opacity: 0.85 }} />
-            <span style={{ fontSize: 9, color: C.hint, textAlign: "center", width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: 9, color: textHint, textAlign: "center", width: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {d.topic}
             </span>
           </div>
@@ -299,104 +282,87 @@ function VBarChart({ data }: { data: DepthPoint[] }) {
 // ── Main page ─────────────────────────────────────────────────
 export default function DashboardPage() {
   const router = useRouter()
+  const { theme } = useTheme()
+  const isDark = theme === "dark"
   const [showAnalytics, setShowAnalytics] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
 
   useEffect(() => {
     async function getUser() {
       const { data } = await supabase.auth.getUser()
-
       if (data.user) {
         setEmail(data.user.email ?? null)
+      } else {
+        router.push("/login")
       }
     }
-
     getUser()
-  }, [])
+  }, [router])
 
-  const activeSessions   = SESSIONS.filter(s => s.status === "active").length
+  const activeSessions      = SESSIONS.filter(s => s.status === "active").length
   const totalTopicsThisWeek = SESSIONS.reduce((a, s) => a + s.topicsDone, 0)
   const sessionsWithDepth   = SESSIONS.filter(s => s.avgDepth > 0)
   const avgDepth = sessionsWithDepth.length
     ? Math.round(sessionsWithDepth.reduce((a, s) => a + s.avgDepth, 0) / sessionsWithDepth.length)
     : 0
   const topDeferred = DEFER_DATA[0]?.topic ?? "—"
-  
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div className="min-h-screen bg-stone-50 dark:bg-[#0D0D0F] text-stone-900 dark:text-[#EEEEF2] font-sans">
 
-      {/* ── Top bar ── */}
-      <header style={{
-        borderBottom: `1px solid ${C.border}`, padding: "0 2rem",
-        height: 56, display: "flex", alignItems: "center", justifyContent: "space-between",
-        position: "sticky", top: 0, background: C.bg, zIndex: 50,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 8, background: C.violet,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 13, fontWeight: 700, color: "#fff",
-          }}>M</div>
-          <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em" }}>Ormify</span>
+      {/* Header */}
+      <header className="sticky top-0 z-50 h-14 flex items-center justify-between px-8 border-b border-stone-200 dark:border-white/[0.06] bg-stone-50 dark:bg-[#0D0D0F]">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-[#7B61FF] flex items-center justify-center text-[13px] font-bold text-white">
+            O
+          </div>
+          <span className="font-bold text-[15px] tracking-tight">Ormify</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 12, color: C.muted }}>
-         {email ?? "Loading..."}
-        </span>          
-        <button
-             onClick={async () => {
-            await supabase.auth.signOut()
-            router.push("/login")
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-stone-500 dark:text-[#8A8A9A]">{email ?? ""}</span>
+          <ThemeToggle />
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut()
+              router.push("/login")
             }}
-
-            style={{
-            fontSize: 12, color: C.hint, background: "none",
-            border: `1px solid ${C.border}`, borderRadius: 6,
-            padding: "4px 10px", cursor: "pointer",
-          }}>
+            className="text-xs text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-white/[0.12] rounded-md px-2.5 py-1 cursor-pointer bg-transparent hover:text-stone-900 dark:hover:text-white transition-colors"
+          >
             Sign out
           </button>
         </div>
       </header>
 
-      {/* ── Main ── */}
-      <main style={{ maxWidth: 920, margin: "0 auto", padding: "2rem 1.5rem" }}>
+      {/* Main */}
+      <main className="max-w-[920px] mx-auto px-6 py-8">
 
         {/* Page header + New Session CTA */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.75rem" }}>
+        <div className="flex justify-between items-start mb-7">
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 5px", letterSpacing: "-0.025em" }}>
+            <h1 className="text-[22px] font-bold tracking-tight m-0 mb-[5px]">
               Your sessions
             </h1>
-            <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>
+            <p className="text-[13px] text-stone-500 dark:text-[#8A8A9A] m-0">
               {SESSIONS.length} sessions · {activeSessions} active
             </p>
           </div>
           <button
             onClick={() => router.push("/session")}
-            style={{
-              background: C.violet, color: "#fff", borderRadius: 9,
-              padding: "10px 20px", fontSize: 13, fontWeight: 600,
-              cursor: "pointer", border: "none", letterSpacing: "-0.01em",
-              transition: "opacity 0.12s",
-            }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = "0.88")}
-            onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
+            className="bg-[#7B61FF] text-white rounded-[9px] px-5 py-2.5 text-[13px] font-semibold cursor-pointer border-none tracking-tight hover:opacity-90 transition-opacity"
           >
             + New session
           </button>
         </div>
 
-        {/* ── Summary strip ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: "2rem" }}>
-          <StatCard label="Topics this week"  value={String(totalTopicsThisWeek)} color={C.violet} />
-          <StatCard label="Avg depth score"   value={avgDepth + "%"}              color={C.teal}   sub="across all sessions" />
-          <StatCard label="Most deferred"     value=""                            color={C.amber}  sub={topDeferred} />
+        {/* Summary strip */}
+        <div className="grid grid-cols-3 gap-3 mb-8">
+          <StatCard label="Topics this week"  value={String(totalTopicsThisWeek)} color={COLORS.violet} />
+          <StatCard label="Avg depth score"   value={avgDepth + "%"}              color={COLORS.teal}   sub="across all sessions" />
+          <StatCard label="Most deferred"     value=""                            color={COLORS.amber}  sub={topDeferred} />
         </div>
 
-        {/* ── Sessions grid ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, marginBottom: "2.5rem" }}>
+        {/* Sessions grid */}
+        <div className="grid grid-cols-2 gap-3 mb-10">
           {SESSIONS.map(s => (
             <SessionCard
               key={s.id}
@@ -406,24 +372,24 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* ── Analytics section ── */}
-        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: "1.75rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: showAnalytics ? "1.5rem" : 0 }}>
+        {/* Analytics section */}
+        <div className="border-t border-stone-200 dark:border-white/[0.06] pt-7">
+          <div className="flex justify-between items-center mb-6">
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.015em" }}>
+              <h2 className="text-base font-bold tracking-tight m-0 mb-1">
                 Learning analytics
               </h2>
-              <p style={{ fontSize: 12, color: C.muted, margin: 0 }}>
+              <p className="text-xs text-stone-500 dark:text-[#8A8A9A] m-0">
                 Pace, depth, and deferral patterns across all sessions
               </p>
             </div>
             <button
               onClick={() => setShowAnalytics(v => !v)}
+              className="text-xs rounded-lg px-3.5 py-[7px] cursor-pointer border"
               style={{
-                fontSize: 12, color: C.violet,
-                background: C.violet + "18",
-                border: `1px solid ${C.violet}33`,
-                borderRadius: 7, padding: "7px 14px", cursor: "pointer",
+                color: COLORS.violet,
+                background: COLORS.violet + "18",
+                borderColor: COLORS.violet + "33",
               }}
             >
               {showAnalytics ? "Hide ↑" : "Show analytics ↓"}
@@ -431,26 +397,26 @@ export default function DashboardPage() {
           </div>
 
           {showAnalytics && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="flex flex-col gap-3">
 
-              {/* Pace line chart — full width */}
-              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.125rem 1.25rem" }}>
+              {/* Pace line chart */}
+              <div className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem]">
                 <SectionLabel>Pace accuracy — actual vs estimated (ratio)</SectionLabel>
-                <PaceLineChart data={PACE_DATA} />
-                <p style={{ fontSize: 10, color: C.hint, margin: "8px 0 0" }}>
+                <PaceLineChart data={PACE_DATA} isDark={isDark} />
+                <p className="text-[10px] text-stone-500 dark:text-[#6B6B80] mt-2 m-0">
                   Dashed line = perfect estimation (1.0×). Above = you underestimated how long that topic takes.
                 </p>
               </div>
 
-              {/* Two-col row */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.125rem 1.25rem" }}>
+              {/* Two-col charts */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem]">
                   <SectionLabel>Most deferred topics — chronic blind spots</SectionLabel>
-                  <HBarChart data={DEFER_DATA} color={C.red} />
+                  <HBarChart data={DEFER_DATA} color={COLORS.red} isDark={isDark} />
                 </div>
-                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "1.125rem 1.25rem" }}>
+                <div className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem]">
                   <SectionLabel>Depth scores per topic</SectionLabel>
-                  <VBarChart data={DEPTH_DATA} />
+                  <VBarChart data={DEPTH_DATA} isDark={isDark} />
                 </div>
               </div>
 

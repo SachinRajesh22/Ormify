@@ -1,24 +1,42 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
+import { useTheme } from "../../lib/theme"
+import { ThemeToggle } from "../../components/ThemeToggle"
 
 // ── Color tokens ──────────────────────────────────────────────
-const C = {
+const C_DARK = {
   bg:        "#0D0D0F",
   card:      "#141416",
-  cardHov:   "#1A1A1E",
   surface:   "#111113",
   border:    "rgba(255,255,255,0.06)",
-  borderHov: "rgba(255,255,255,0.11)",
   text:      "#EEEEF2",
   muted:     "#8A8A9A",
-  hint:      "#4A4A5A",
+  hint:      "#6B6B80",
   violet:    "#7B61FF",
   teal:      "#10CFA8",
   amber:     "#F59E0B",
   red:       "#EF4444",
 }
+
+const C_LIGHT = {
+  bg:        "#FAFAFA",
+  card:      "#FFFFFF",
+  surface:   "#F4F4F5",
+  border:    "rgba(0,0,0,0.08)",
+  text:      "#18181B",
+  muted:     "#71717A",
+  hint:      "#A1A1AA",
+  violet:    "#7B61FF",
+  teal:      "#0E9E81",
+  amber:     "#D97706",
+  red:       "#DC2626",
+}
+
+type ColorScheme = typeof C_DARK
+const ThemeColors = createContext<ColorScheme>(C_DARK)
+function useColors() { return useContext(ThemeColors) }
 
 // ── Types ─────────────────────────────────────────────────────
 type Step = 1 | 2 | 3
@@ -53,10 +71,10 @@ function uid() {
 
 function computeFeasibility(topics: Topic[], deadline: string): Feasibility {
   if (!deadline || topics.length === 0) return null
-  const daysLeft    = (new Date(deadline).getTime() - Date.now()) / 86_400_000
-  const totalHours  = topics.reduce((a, t) => a + t.estimatedHours, 0)
-  const available   = daysLeft * 6 // assume 6 study hours per day
-  const ratio       = available / totalHours
+  const daysLeft   = (new Date(deadline).getTime() - Date.now()) / 86_400_000
+  const totalHours = topics.reduce((a, t) => a + t.estimatedHours, 0)
+  const available  = daysLeft * 6
+  const ratio      = available / totalHours
   if (ratio < 0.85) return "tight"
   if (ratio < 1.5)  return "manageable"
   return "comfortable"
@@ -64,6 +82,7 @@ function computeFeasibility(topics: Topic[], deadline: string): Feasibility {
 
 // ── Sub-components ────────────────────────────────────────────
 function StepIndicator({ current }: { current: Step }) {
+  const C = useColors()
   const steps = [
     { n: 1 as Step, label: "Name" },
     { n: 2 as Step, label: "Topics" },
@@ -73,7 +92,6 @@ function StepIndicator({ current }: { current: Step }) {
     <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: "2rem" }}>
       {steps.map((s, i) => (
         <div key={s.n} style={{ display: "flex", alignItems: "center" }}>
-          {/* Connector line */}
           {i > 0 && (
             <div style={{
               width: 40, height: 1,
@@ -81,7 +99,6 @@ function StepIndicator({ current }: { current: Step }) {
               transition: "background 0.2s",
             }} />
           )}
-          {/* Step circle + label */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
             <div style={{
               width: 28, height: 28, borderRadius: "50%", display: "flex",
@@ -112,6 +129,7 @@ function StepIndicator({ current }: { current: Step }) {
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
+  const C = useColors()
   return (
     <label style={{
       fontSize: 11, color: C.muted, display: "block", marginBottom: 7,
@@ -123,6 +141,7 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 }
 
 function Card({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  const C = useColors()
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`,
@@ -134,11 +153,8 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
 }
 
 // ── Step 1: Name ──────────────────────────────────────────────
-function Step1({
-  value, onChange,
-}: {
-  value: string; onChange: (v: string) => void
-}) {
+function Step1({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const C = useColors()
   return (
     <Card>
       <FieldLabel>Session name</FieldLabel>
@@ -152,8 +168,8 @@ function Step1({
           borderRadius: 8, padding: "10px 14px", fontSize: 14,
           color: C.text, outline: "none", boxSizing: "border-box",
         }}
-        onFocus={e  => (e.target.style.borderColor = C.violet)}
-        onBlur={e   => (e.target.style.borderColor = C.border)}
+        onFocus={e => (e.target.style.borderColor = C.violet)}
+        onBlur={e  => (e.target.style.borderColor = C.border)}
       />
       <p style={{ fontSize: 11, color: C.hint, margin: "10px 0 0" }}>
         This is just a label — you can rename it later.
@@ -173,12 +189,12 @@ function Step2({
   fileName:     string | null
   setFileName:  (v: string | null) => void
 }) {
-  const [manualText, setManualText]   = useState("")
-  const [dragOver,   setDragOver]     = useState(false)
-  const [dragIndex,  setDragIndex]    = useState<number | null>(null)
+  const C = useColors()
+  const [manualText, setManualText] = useState("")
+  const [dragOver,   setDragOver]   = useState(false)
+  const [dragIndex,  setDragIndex]  = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Simulate PDF extraction + Claude parse
   const simulateUpload = (name: string) => {
     setFileName(name)
     setUploading(true)
@@ -196,13 +212,9 @@ function Step2({
 
   const parseManual = () => {
     const lines = manualText.split("\n").map(l => l.trim()).filter(Boolean)
-    const parsed: Topic[] = lines.map(name => ({
-      id: uid(), name, estimatedHours: 1.5,
-    }))
-    setTopics(parsed)
+    setTopics(lines.map(name => ({ id: uid(), name, estimatedHours: 1.5 })))
   }
 
-  // Drag-to-reorder
   const onDragStart = (i: number) => setDragIndex(i)
   const onDragOver  = (e: React.DragEvent, i: number) => {
     e.preventDefault()
@@ -219,15 +231,11 @@ function Step2({
     setTopics(topics.map(t => t.id === id ? { ...t, name } : t))
   const updateHours = (id: string, h: number) =>
     setTopics(topics.map(t => t.id === id ? { ...t, estimatedHours: h } : t))
-  const remove      = (id: string) =>
-    setTopics(topics.filter(t => t.id !== id))
-  const addEmpty    = () =>
-    setTopics([...topics, { id: uid(), name: "", estimatedHours: 1.5 }])
+  const remove      = (id: string) => setTopics(topics.filter(t => t.id !== id))
+  const addEmpty    = () => setTopics([...topics, { id: uid(), name: "", estimatedHours: 1.5 }])
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-      {/* Upload + Manual — two columns */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
 
         {/* PDF upload */}
@@ -269,9 +277,7 @@ function Step2({
                 }} />
                 <span style={{ fontSize: 11, color: C.muted }}>Extracting topics from PDF…</span>
               </div>
-              <div style={{ fontSize: 10, color: C.hint }}>
-                PyMuPDF → Claude API → topic list
-              </div>
+              <div style={{ fontSize: 10, color: C.hint }}>PyMuPDF → Claude API → topic list</div>
             </div>
           )}
         </Card>
@@ -291,8 +297,8 @@ function Step2({
               resize: "none", outline: "none", boxSizing: "border-box",
               fontFamily: "monospace", lineHeight: 1.7,
             }}
-            onFocus={e  => (e.target.style.borderColor = C.violet)}
-            onBlur={e   => (e.target.style.borderColor = C.border)}
+            onFocus={e => (e.target.style.borderColor = C.violet)}
+            onBlur={e  => (e.target.style.borderColor = C.border)}
           />
           <button
             onClick={parseManual}
@@ -339,13 +345,10 @@ function Step2({
                   cursor: "grab", transition: "all 0.1s",
                 }}
               >
-                {/* Drag handle */}
                 <span style={{ color: C.hint, fontSize: 12, cursor: "grab", flexShrink: 0 }}>⋮⋮</span>
-                {/* Index */}
                 <span style={{ fontSize: 10, color: C.hint, fontFamily: "monospace", width: 18, flexShrink: 0 }}>
                   {String(i + 1).padStart(2, "0")}
                 </span>
-                {/* Name input */}
                 <input
                   value={t.name}
                   onChange={e => updateName(t.id, e.target.value)}
@@ -355,7 +358,6 @@ function Step2({
                   }}
                   placeholder="Topic name"
                 />
-                {/* Hours input */}
                 <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                   <input
                     type="number"
@@ -370,7 +372,6 @@ function Step2({
                   />
                   <span style={{ fontSize: 10, color: C.hint }}>h</span>
                 </div>
-                {/* Remove */}
                 <button
                   onClick={() => remove(t.id)}
                   style={{ color: C.hint, background: "none", border: "none", cursor: "pointer", fontSize: 14, padding: "0 2px", flexShrink: 0 }}
@@ -388,10 +389,7 @@ function Step2({
         </Card>
       )}
 
-      {/* Spin animation */}
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
@@ -400,21 +398,19 @@ function Step2({
 function Step3({
   topics, deadline, setDeadline, feasibility, setFeasibility,
 }: {
-  topics:          Topic[]
-  deadline:        string
-  setDeadline:     (v: string) => void
-  feasibility:     Feasibility
-  setFeasibility:  (v: Feasibility) => void
+  topics:         Topic[]
+  deadline:       string
+  setDeadline:    (v: string) => void
+  feasibility:    Feasibility
+  setFeasibility: (v: Feasibility) => void
 }) {
+  const C = useColors()
   const totalHours = topics.reduce((a, t) => a + t.estimatedHours, 0)
   const daysLeft   = deadline
     ? Math.max(0, Math.ceil((new Date(deadline).getTime() - Date.now()) / 86_400_000))
     : null
 
-  const feasibilityConfig: Record<
-    NonNullable<Feasibility>,
-    { label: string; color: string; bg: string; icon: string }
-  > = {
+  const feasibilityConfig: Record<NonNullable<Feasibility>, { label: string; color: string; bg: string; icon: string }> = {
     tight:       { label: "Tight",       color: C.red,   bg: C.red   + "18", icon: "⚠" },
     manageable:  { label: "Manageable",  color: C.amber, bg: C.amber + "18", icon: "⚡" },
     comfortable: { label: "Comfortable", color: C.teal,  bg: C.teal  + "18", icon: "✓" },
@@ -444,7 +440,6 @@ function Step3({
         />
       </Card>
 
-      {/* Feasibility banner */}
       {feasibility && deadline && (
         <div style={{
           background: feasibilityConfig[feasibility].bg,
@@ -464,7 +459,6 @@ function Step3({
         </div>
       )}
 
-      {/* Priority order */}
       {topics.length > 0 && deadline && (
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -483,18 +477,14 @@ function Step3({
                     borderBottom: i < topics.length - 1 ? `1px solid ${C.border}` : "none",
                   }}
                 >
-                  <span style={{
-                    fontFamily: "monospace", fontSize: 11, color: C.hint,
-                    width: 20, flexShrink: 0,
-                  }}>
+                  <span style={{ fontFamily: "monospace", fontSize: 11, color: C.hint, width: 20, flexShrink: 0 }}>
                     {String(i + 1).padStart(2, "0")}
                   </span>
                   <span style={{ flex: 1, fontSize: 13, color: C.text }}>{t.name}</span>
                   <span style={{ fontSize: 11, color: C.muted, fontFamily: "monospace" }}>
                     ~{t.estimatedHours}h
                   </span>
-                  {/* Visual weight bar */}
-                  <div style={{ width: 50, height: 3, background: "rgba(255,255,255,0.05)", borderRadius: 99 }}>
+                  <div style={{ width: 50, height: 3, background: C.border, borderRadius: 99 }}>
                     <div style={{
                       height: "100%",
                       width: `${(t.estimatedHours / Math.max(...topics.map(x => x.estimatedHours))) * 100}%`,
@@ -516,6 +506,8 @@ function Step3({
 // ── Main page ─────────────────────────────────────────────────
 export default function NewSessionPage() {
   const router = useRouter()
+  const { theme } = useTheme()
+  const C = theme === "dark" ? C_DARK : C_LIGHT
 
   const [step,        setStep]        = useState<Step>(1)
   const [sessionName, setSessionName] = useState("")
@@ -537,11 +529,10 @@ export default function NewSessionPage() {
     if (step < 3) {
       setStep(s => (s + 1) as Step)
     } else {
-      // Simulate POST /sessions + POST /sessions/{id}/parse-syllabus
       setSubmitting(true)
       setTimeout(() => {
         setSubmitting(false)
-        router.push("/study/s_new") // swap with real session id from API response
+        router.push("/study/s_new")
       }, 900)
     }
   }
@@ -553,117 +544,112 @@ export default function NewSessionPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <ThemeColors.Provider value={C}>
+      <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
 
-      {/* ── Top bar ── */}
-      <header style={{
-        borderBottom: `1px solid ${C.border}`, padding: "0 2rem",
-        height: 56, display: "flex", alignItems: "center", justifyContent: "space-between",
-        position: "sticky", top: 0, background: C.bg, zIndex: 50,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 8, background: C.violet,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 13, fontWeight: 700, color: "#fff",
-          }}>M</div>
-          <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em" }}>Ormify</span>
-        </div>
-        <button
-          onClick={() => router.push("/dashboard")}
-          style={{
-            fontSize: 12, color: C.muted, background: "none",
-            border: `1px solid ${C.border}`, borderRadius: 6,
-            padding: "4px 12px", cursor: "pointer",
-          }}
-        >
-          ← Back to dashboard
-        </button>
-      </header>
-
-      {/* ── Main ── */}
-      <main style={{ maxWidth: 620, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
-
-        {/* Page title */}
-        <div style={{ marginBottom: "2rem" }}>
-          <h1 style={{ fontSize: 21, fontWeight: 700, margin: "0 0 5px", letterSpacing: "-0.025em" }}>
-            New session
-          </h1>
-          <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>
-            {stepLabels[step]}
-          </p>
-        </div>
-
-        {/* Step indicators */}
-        <StepIndicator current={step} />
-
-        {/* Step content */}
-        {step === 1 && (
-          <Step1 value={sessionName} onChange={setSessionName} />
-        )}
-        {step === 2 && (
-          <Step2
-            topics={topics}
-            setTopics={setTopics}
-            uploading={uploading}
-            setUploading={setUploading}
-            fileName={fileName}
-            setFileName={setFileName}
-          />
-        )}
-        {step === 3 && (
-          <Step3
-            topics={topics}
-            deadline={deadline}
-            setDeadline={setDeadline}
-            feasibility={feasibility}
-            setFeasibility={setFeasibility}
-          />
-        )}
-
-        {/* ── Navigation ── */}
-        <div style={{ display: "flex", gap: 10, marginTop: "1.5rem" }}>
-          {step > 1 && (
+        {/* ── Top bar ── */}
+        <header style={{
+          borderBottom: `1px solid ${C.border}`, padding: "0 2rem",
+          height: 56, display: "flex", alignItems: "center", justifyContent: "space-between",
+          position: "sticky", top: 0, background: C.bg, zIndex: 50,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: 8, background: C.violet,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 13, fontWeight: 700, color: "#fff",
+            }}>O</div>
+            <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em", color: C.text }}>Ormify</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <ThemeToggle />
             <button
-              onClick={handleBack}
+              onClick={() => router.push("/dashboard")}
               style={{
-                flex: 1, padding: "11px", fontSize: 13,
-                cursor: "pointer", borderRadius: 9,
-                border: `1px solid ${C.border}`,
-                background: "transparent", color: C.muted,
+                fontSize: 12, color: C.muted, background: "none",
+                border: `1px solid ${C.border}`, borderRadius: 6,
+                padding: "4px 12px", cursor: "pointer",
               }}
             >
-              ← Back
+              ← Back to dashboard
             </button>
-          )}
-          <button
-            onClick={handleNext}
-            disabled={!canProceed || submitting}
-            style={{
-              flex: 2, padding: "11px", fontSize: 13, fontWeight: 600,
-              cursor: canProceed ? "pointer" : "not-allowed",
-              borderRadius: 9, border: "none",
-              background: canProceed ? C.violet : C.hint,
-              color: "#fff", letterSpacing: "-0.01em",
-              opacity: submitting ? 0.7 : 1,
-              transition: "all 0.15s",
-            }}
-          >
-            {submitting
-              ? "Creating session…"
-              : step === 3
-                ? "Start session →"
-                : "Continue →"}
-          </button>
-        </div>
+          </div>
+        </header>
 
-        {/* Step 2 hint */}
-        {step === 2 && topics.length === 0 && !uploading && (
-          <p style={{ fontSize: 11, color: C.hint, textAlign: "center", marginTop: 12 }}>
-            Upload a PDF or paste topics manually to continue
-          </p>
-        )}
-      </main>
-    </div>
+        {/* ── Main ── */}
+        <main style={{ maxWidth: 620, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
+
+          <div style={{ marginBottom: "2rem" }}>
+            <h1 style={{ fontSize: 21, fontWeight: 700, margin: "0 0 5px", letterSpacing: "-0.025em", color: C.text }}>
+              New session
+            </h1>
+            <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>
+              {stepLabels[step]}
+            </p>
+          </div>
+
+          <StepIndicator current={step} />
+
+          {step === 1 && <Step1 value={sessionName} onChange={setSessionName} />}
+          {step === 2 && (
+            <Step2
+              topics={topics}
+              setTopics={setTopics}
+              uploading={uploading}
+              setUploading={setUploading}
+              fileName={fileName}
+              setFileName={setFileName}
+            />
+          )}
+          {step === 3 && (
+            <Step3
+              topics={topics}
+              deadline={deadline}
+              setDeadline={setDeadline}
+              feasibility={feasibility}
+              setFeasibility={setFeasibility}
+            />
+          )}
+
+          {/* ── Navigation ── */}
+          <div style={{ display: "flex", gap: 10, marginTop: "1.5rem" }}>
+            {step > 1 && (
+              <button
+                onClick={handleBack}
+                style={{
+                  flex: 1, padding: "11px", fontSize: 13,
+                  cursor: "pointer", borderRadius: 9,
+                  border: `1px solid ${C.border}`,
+                  background: "transparent", color: C.muted,
+                }}
+              >
+                ← Back
+              </button>
+            )}
+            <button
+              onClick={handleNext}
+              disabled={!canProceed || submitting}
+              style={{
+                flex: 2, padding: "11px", fontSize: 13, fontWeight: 600,
+                cursor: canProceed ? "pointer" : "not-allowed",
+                borderRadius: 9, border: "none",
+                background: canProceed ? C.violet : C.hint,
+                color: "#fff", letterSpacing: "-0.01em",
+                opacity: submitting ? 0.7 : 1,
+                transition: "all 0.15s",
+              }}
+            >
+              {submitting ? "Creating session…" : step === 3 ? "Start session →" : "Continue →"}
+            </button>
+          </div>
+
+          {step === 2 && topics.length === 0 && !uploading && (
+            <p style={{ fontSize: 11, color: C.hint, textAlign: "center", marginTop: 12 }}>
+              Upload a PDF or paste topics manually to continue
+            </p>
+          )}
+        </main>
+      </div>
+    </ThemeColors.Provider>
   )
 }
