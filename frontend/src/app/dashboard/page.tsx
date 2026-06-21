@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { supabase } from "../../lib/supabase"
 import { ThemeToggle } from "../../components/ThemeToggle"
 import { useTheme } from "../../lib/theme"
+import { API } from "../../lib/api"
 
 // Hex values used only in SVG elements and dynamic inline styles (where Tailwind classes can't reach)
 const COLORS = {
@@ -35,55 +36,33 @@ interface PacePoint  { topic: string; ratio: number }
 interface DeferPoint { topic: string; count: number }
 interface DepthPoint { topic: string; score: number }
 
-// ── Dummy data ────────────────────────────────────────────────
-const SESSIONS: StudySession[] = [
-  {
-    id: "s1", name: "DSA Exam", deadline: "2026-06-22",
-    topicsTotal: 12, topicsDone: 5, readiness: 41,
-    status: "active", avgDepth: 62, mostDeferred: "Dynamic Programming",
-  },
-  {
-    id: "s2", name: "OS Mid Sem", deadline: "2026-06-28",
-    topicsTotal: 8, topicsDone: 6, readiness: 72,
-    status: "upcoming", avgDepth: 78, mostDeferred: "Memory Management",
-  },
-  {
-    id: "s3", name: "DBMS Finals", deadline: "2026-06-15",
-    topicsTotal: 10, topicsDone: 10, readiness: 63,
-    status: "completed", avgDepth: 65, mostDeferred: null,
-  },
-  {
-    id: "s4", name: "Computer Networks", deadline: "2026-07-05",
-    topicsTotal: 9, topicsDone: 0, readiness: 0,
-    status: "upcoming", avgDepth: 0, mostDeferred: null,
-  },
-]
+interface RawTopic { id: string; status: string }
 
-const PACE_DATA: PacePoint[] = [
-  { topic: "Arrays",  ratio: 1.25 },
-  { topic: "Lists",   ratio: 1.2  },
-  { topic: "Sorting", ratio: 0.85 },
-  { topic: "BST",     ratio: 1.6  },
-  { topic: "Graphs",  ratio: 1.3  },
-  { topic: "DP",      ratio: 1.8  },
-]
+interface RawSession {
+  id:       string
+  title:    string
+  deadline: string
+  topics:   RawTopic[]
+  [key: string]: unknown
+}
 
-const DEFER_DATA: DeferPoint[] = [
-  { topic: "Dynamic Programming", count: 4 },
-  { topic: "Graphs",              count: 3 },
-  { topic: "Trees",               count: 2 },
-  { topic: "Recursion",           count: 2 },
-  { topic: "Tries",               count: 1 },
-]
-
-const DEPTH_DATA: DepthPoint[] = [
-  { topic: "Arrays",  score: 90 },
-  { topic: "Lists",   score: 67 },
-  { topic: "Sorting", score: 85 },
-  { topic: "BST",     score: 33 },
-  { topic: "DP",      score: 33 },
-  { topic: "Queues",  score: 75 },
-]
+function mapSession(r: RawSession): StudySession {
+  const topics     = r.topics ?? []
+  const total      = topics.length
+  const done       = topics.filter(t => t.status === "completed").length
+  const isPast     = new Date(r.deadline) < new Date()
+  return {
+    id:           r.id,
+    name:         r.title,
+    deadline:     r.deadline,
+    topicsTotal:  total,
+    topicsDone:   done,
+    readiness:    total > 0 ? Math.round((done / total) * 100) : 0,
+    status:       isPast ? "completed" : "upcoming",
+    avgDepth:     0,
+    mostDeferred: null,
+  }
+}
 
 function scoreColor(n: number): string {
   return n >= 70 ? COLORS.teal : n >= 50 ? COLORS.amber : n > 0 ? COLORS.red : COLORS.hint
@@ -139,9 +118,9 @@ function StatusBadge({ status }: { status: SessionStatus }) {
 }
 
 function SessionCard({
-  session, onClick,
+  session, onClick, onDelete,
 }: {
-  session: StudySession; onClick: () => void
+  session: StudySession; onClick: () => void; onDelete: () => void
 }) {
   const pct  = Math.round((session.topicsDone / session.topicsTotal) * 100) || 0
   const col  = scoreColor(session.readiness)
@@ -150,8 +129,15 @@ function SessionCard({
   return (
     <div
       onClick={onClick}
-      className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem] cursor-pointer transition-colors hover:bg-stone-50 dark:hover:bg-[#1A1A1E] hover:border-stone-300 dark:hover:border-white/[0.11]"
+      className="relative bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem] cursor-pointer transition-colors hover:bg-stone-50 dark:hover:bg-[#1A1A1E] hover:border-stone-300 dark:hover:border-white/[0.11]"
     >
+      <button
+        onClick={e => { e.stopPropagation(); onDelete() }}
+        className="absolute top-2.5 right-2.5 w-5 h-5 flex items-center justify-center rounded-full text-stone-400 dark:text-[#555565] hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 transition-colors text-xs leading-none"
+        title="Delete session"
+      >
+        ×
+      </button>
       {/* Top row */}
       <div className="flex justify-between items-start mb-3.5">
         <div>
@@ -166,7 +152,7 @@ function SessionCard({
               : " · Completed"}
           </p>
         </div>
-        <div className="text-right flex-shrink-0 ml-3">
+        <div className="text-right flex-shrink-0 ml-3 mr-4">
           <div className="font-mono text-[22px] font-bold tracking-tight leading-none" style={{ color: col }}>
             {session.readiness}%
           </div>
@@ -285,27 +271,64 @@ export default function DashboardPage() {
   const { theme } = useTheme()
   const isDark = theme === "dark"
   const [showAnalytics, setShowAnalytics] = useState(false)
-  const [email, setEmail] = useState<string | null>(null)
+  const [email,       setEmail]       = useState<string | null>(null)
+  const [sessions,    setSessions]    = useState<StudySession[]>([])
+  const [paceData,    setPaceData]    = useState<PacePoint[]>([])
+  const [deferData,   setDeferData]   = useState<DeferPoint[]>([])
+  const [depthData,   setDepthData]   = useState<DepthPoint[]>([])
+  const [loading,     setLoading]     = useState(true)
+  const [sessionsErr, setSessionsErr] = useState<string | null>(null)
 
   useEffect(() => {
-    async function getUser() {
+    async function init() {
       const { data } = await supabase.auth.getUser()
-      if (data.user) {
-        setEmail(data.user.email ?? null)
-      } else {
-        router.push("/login")
+      if (!data.user) { router.push("/login"); return }
+      setEmail(data.user.email ?? null)
+
+      setLoading(true)
+      try {
+        const res = await fetch(`${API}/sessions?user_id=${data.user.id}`)
+        if (!res.ok) throw new Error(`${res.status}`)
+        const mapped = (await res.json() as RawSession[]).map(mapSession)
+        setSessions(mapped)
+
+        const active = mapped.find(s => s.status === "active")
+        await Promise.all([
+          active
+            ? fetch(`${API}/sessions/${active.id}/analytics/pace`)
+                .then(r => r.ok ? r.json() : [])
+                .then((raw: { topic: string; pace_ratio: number }[]) =>
+                  setPaceData(raw.map(p => ({ topic: p.topic, ratio: p.pace_ratio }))))
+                .catch(() => {})
+            : Promise.resolve(),
+          fetch(`${API}/users/${data.user.id}/analytics/deferred`)
+            .then(r => r.ok ? r.json() : [])
+            .then((raw: { topic: string; defer_count: number }[]) =>
+              setDeferData(raw.map(d => ({ topic: d.topic, count: d.defer_count }))))
+            .catch(() => {}),
+          active
+            ? fetch(`${API}/sessions/${active.id}/analytics/depth`)
+                .then(r => r.ok ? r.json() : [])
+                .then((d: DepthPoint[]) => setDepthData(d))
+                .catch(() => {})
+            : Promise.resolve(),
+        ])
+      } catch (err) {
+        setSessionsErr(err instanceof Error ? err.message : "Failed to load sessions")
+      } finally {
+        setLoading(false)
       }
     }
-    getUser()
+    init()
   }, [router])
 
-  const activeSessions      = SESSIONS.filter(s => s.status === "active").length
-  const totalTopicsThisWeek = SESSIONS.reduce((a, s) => a + s.topicsDone, 0)
-  const sessionsWithDepth   = SESSIONS.filter(s => s.avgDepth > 0)
+  const activeSessions      = sessions.filter(s => s.status === "active").length
+  const totalTopicsThisWeek = sessions.reduce((a, s) => a + s.topicsDone, 0)
+  const sessionsWithDepth   = sessions.filter(s => s.avgDepth > 0)
   const avgDepth = sessionsWithDepth.length
     ? Math.round(sessionsWithDepth.reduce((a, s) => a + s.avgDepth, 0) / sessionsWithDepth.length)
     : 0
-  const topDeferred = DEFER_DATA[0]?.topic ?? "—"
+  const topDeferred = deferData[0]?.topic ?? "—"
 
   return (
     <div className="min-h-screen bg-stone-50 dark:bg-[#0D0D0F] text-stone-900 dark:text-[#EEEEF2] font-sans">
@@ -343,7 +366,7 @@ export default function DashboardPage() {
               Your sessions
             </h1>
             <p className="text-[13px] text-stone-500 dark:text-[#8A8A9A] m-0">
-              {SESSIONS.length} sessions · {activeSessions} active
+              {sessions.length} sessions · {activeSessions} active
             </p>
           </div>
           <button
@@ -363,13 +386,32 @@ export default function DashboardPage() {
 
         {/* Sessions grid */}
         <div className="grid grid-cols-2 gap-3 mb-10">
-          {SESSIONS.map(s => (
-            <SessionCard
-              key={s.id}
-              session={s}
-              onClick={() => router.push(`/study/${s.id}`)}
-            />
-          ))}
+          {loading ? (
+            <p className="col-span-2 text-sm text-stone-500 dark:text-[#8A8A9A] py-8 text-center">
+              Loading sessions…
+            </p>
+          ) : sessionsErr ? (
+            <p className="col-span-2 text-sm text-red-500 py-8 text-center">
+              Could not load sessions: {sessionsErr}
+            </p>
+          ) : sessions.length === 0 ? (
+            <p className="col-span-2 text-sm text-stone-500 dark:text-[#8A8A9A] py-8 text-center">
+              No sessions yet — create one above.
+            </p>
+          ) : (
+            sessions.map(s => (
+              <SessionCard
+                key={s.id}
+                session={s}
+                onClick={() => router.push(`/study/${s.id}`)}
+                onDelete={async () => {
+                  if (!confirm(`Delete "${s.name}"?`)) return
+                  await fetch(`${API}/sessions/${s.id}`, { method: "DELETE" })
+                  setSessions(prev => prev.filter(x => x.id !== s.id))
+                }}
+              />
+            ))
+          )}
         </div>
 
         {/* Analytics section */}
@@ -402,7 +444,7 @@ export default function DashboardPage() {
               {/* Pace line chart */}
               <div className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem]">
                 <SectionLabel>Pace accuracy — actual vs estimated (ratio)</SectionLabel>
-                <PaceLineChart data={PACE_DATA} isDark={isDark} />
+                <PaceLineChart data={paceData} isDark={isDark} />
                 <p className="text-[10px] text-stone-500 dark:text-[#6B6B80] mt-2 m-0">
                   Dashed line = perfect estimation (1.0×). Above = you underestimated how long that topic takes.
                 </p>
@@ -412,11 +454,11 @@ export default function DashboardPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem]">
                   <SectionLabel>Most deferred topics — chronic blind spots</SectionLabel>
-                  <HBarChart data={DEFER_DATA} color={COLORS.red} isDark={isDark} />
+                  <HBarChart data={deferData} color={COLORS.red} isDark={isDark} />
                 </div>
                 <div className="bg-white dark:bg-[#141416] border border-stone-200 dark:border-white/[0.06] rounded-xl px-5 py-[1.125rem]">
                   <SectionLabel>Depth scores per topic</SectionLabel>
-                  <VBarChart data={DEPTH_DATA} isDark={isDark} />
+                  <VBarChart data={depthData} isDark={isDark} />
                 </div>
               </div>
 

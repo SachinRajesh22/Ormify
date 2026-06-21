@@ -4,6 +4,8 @@ import { useState, useRef, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "../../lib/theme"
 import { ThemeToggle } from "../../components/ThemeToggle"
+import { supabase } from "../../lib/supabase"
+import { API } from "../../lib/api"
 
 // ── Color tokens ──────────────────────────────────────────────
 const C_DARK = {
@@ -48,21 +50,6 @@ interface Topic {
   estimatedHours: number
 }
 
-// ── Dummy extracted topics (simulates Claude API response) ────
-const DUMMY_EXTRACTED: Topic[] = [
-  { id: "t1",  name: "Arrays & Strings",        estimatedHours: 2   },
-  { id: "t2",  name: "Linked Lists",             estimatedHours: 1.5 },
-  { id: "t3",  name: "Stacks & Queues",          estimatedHours: 1.5 },
-  { id: "t4",  name: "Trees & BST",              estimatedHours: 3   },
-  { id: "t5",  name: "Graphs & BFS/DFS",         estimatedHours: 3   },
-  { id: "t6",  name: "Dynamic Programming",      estimatedHours: 4   },
-  { id: "t7",  name: "Recursion & Backtracking", estimatedHours: 2   },
-  { id: "t8",  name: "Sorting Algorithms",       estimatedHours: 1.5 },
-  { id: "t9",  name: "Binary Search",            estimatedHours: 1   },
-  { id: "t10", name: "Heaps & Priority Queues",  estimatedHours: 2   },
-  { id: "t11", name: "Hash Maps & Sets",         estimatedHours: 1.5 },
-  { id: "t12", name: "Tries",                    estimatedHours: 1.5 },
-]
 
 // ── Helpers ───────────────────────────────────────────────────
 function uid() {
@@ -180,14 +167,14 @@ function Step1({ value, onChange }: { value: string; onChange: (v: string) => vo
 
 // ── Step 2: Topics ────────────────────────────────────────────
 function Step2({
-  topics, setTopics, uploading, setUploading, fileName, setFileName,
+  topics, setTopics, uploading, fileName, setFileName, setPdfFile,
 }: {
   topics:       Topic[]
   setTopics:    (t: Topic[]) => void
   uploading:    boolean
-  setUploading: (v: boolean) => void
   fileName:     string | null
   setFileName:  (v: string | null) => void
+  setPdfFile:   (f: File | null) => void
 }) {
   const C = useColors()
   const [manualText, setManualText] = useState("")
@@ -195,19 +182,11 @@ function Step2({
   const [dragIndex,  setDragIndex]  = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const simulateUpload = (name: string) => {
-    setFileName(name)
-    setUploading(true)
-    setTopics([])
-    setTimeout(() => {
-      setUploading(false)
-      setTopics(DUMMY_EXTRACTED)
-    }, 2200)
-  }
-
   const handleFile = (file: File) => {
     if (file.type !== "application/pdf") return
-    simulateUpload(file.name)
+    setFileName(file.name)
+    setPdfFile(file)
+    setTopics([])
   }
 
   const parseManual = () => {
@@ -267,17 +246,10 @@ function Step2({
             style={{ display: "none" }}
             onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
           />
-          {uploading && (
-            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{
-                  width: 14, height: 14, borderRadius: "50%",
-                  border: `2px solid ${C.violet}`, borderTopColor: "transparent",
-                  animation: "spin 0.8s linear infinite",
-                }} />
-                <span style={{ fontSize: 11, color: C.muted }}>Extracting topics from PDF…</span>
-              </div>
-              <div style={{ fontSize: 10, color: C.hint }}>PyMuPDF → Claude API → topic list</div>
+          {fileName && (
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13 }}>✓</span>
+              <span style={{ fontSize: 11, color: C.teal }}>PDF ready — topics will be extracted by AI when you submit</span>
             </div>
           )}
         </Card>
@@ -512,28 +484,78 @@ export default function NewSessionPage() {
   const [step,        setStep]        = useState<Step>(1)
   const [sessionName, setSessionName] = useState("")
   const [topics,      setTopics]      = useState<Topic[]>([])
-  const [uploading,   setUploading]   = useState(false)
+  const [uploading] = useState(false)
   const [fileName,    setFileName]    = useState<string | null>(null)
+  const [pdfFile,     setPdfFile]     = useState<File | null>(null)
   const [deadline,    setDeadline]    = useState("")
   const [feasibility, setFeasibility] = useState<Feasibility>(null)
   const [submitting,  setSubmitting]  = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const canProceed =
     step === 1 ? sessionName.trim().length > 0 :
-    step === 2 ? topics.length > 0 && !uploading :
+    step === 2 ? (topics.length > 0 || pdfFile !== null) && !uploading :
     deadline.length > 0
 
   const handleBack = () => setStep(s => Math.max(1, s - 1) as Step)
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step < 3) {
       setStep(s => (s + 1) as Step)
-    } else {
-      setSubmitting(true)
-      setTimeout(() => {
-        setSubmitting(false)
-        router.push("/study/s_new")
-      }, 900)
+      return
+    }
+
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.push("/login"); return }
+
+      const res = await fetch(`${API}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title:    sessionName,
+          deadline: new Date(deadline).toISOString(),
+          user_id:  user.id,
+        }),
+      })
+      if (!res.ok) throw new Error("Failed to create session")
+      const { session_id } = await res.json()
+
+      if (pdfFile) {
+        const form = new FormData()
+        form.append("file", pdfFile)
+        const pr = await fetch(`${API}/sessions/${session_id}/parse-syllabus`, {
+          method: "POST",
+          body: form,
+        })
+        if (!pr.ok) {
+          const detail = await pr.json().catch(() => ({ detail: pr.statusText }))
+          throw new Error(detail.detail ?? "Failed to extract topics from PDF")
+        }
+      } else {
+        const tr = await fetch(`${API}/sessions/${session_id}/topics`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topics: topics.map(t => ({
+              name:            t.name,
+              estimated_hours: t.estimatedHours,
+            })),
+          }),
+        })
+        if (!tr.ok) {
+          const detail = await tr.json().catch(() => ({ detail: tr.statusText }))
+          throw new Error(detail.detail ?? "Failed to save topics")
+        }
+      }
+
+      router.push("/dashboard")
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Something went wrong")
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -596,9 +618,9 @@ export default function NewSessionPage() {
               topics={topics}
               setTopics={setTopics}
               uploading={uploading}
-              setUploading={setUploading}
               fileName={fileName}
               setFileName={setFileName}
+              setPdfFile={setPdfFile}
             />
           )}
           {step === 3 && (
@@ -643,9 +665,14 @@ export default function NewSessionPage() {
             </button>
           </div>
 
-          {step === 2 && topics.length === 0 && !uploading && (
+          {step === 2 && topics.length === 0 && !pdfFile && !uploading && (
             <p style={{ fontSize: 11, color: C.hint, textAlign: "center", marginTop: 12 }}>
               Upload a PDF or paste topics manually to continue
+            </p>
+          )}
+          {submitError && (
+            <p style={{ fontSize: 12, color: C.red, textAlign: "center", marginTop: 10 }}>
+              {submitError}
             </p>
           )}
         </main>
