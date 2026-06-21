@@ -70,6 +70,45 @@ function scoreColor(n: number): string {
 
 // ── Sub-components ────────────────────────────────────────────
 
+function SidebarItem({ icon, label, active = false, collapsed = false, onClick }: {
+  icon: React.ReactNode; label: string; active?: boolean; collapsed?: boolean; onClick?: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      className={`w-full flex items-center gap-2.5 rounded-lg text-[13px] font-medium text-left cursor-pointer border-none transition-colors ${
+        collapsed ? "justify-center px-0 py-2" : "px-2 py-[7px]"
+      } ${
+        active
+          ? "bg-stone-200 dark:bg-white/[0.08] text-stone-900 dark:text-[#EEEEF2]"
+          : "text-stone-600 dark:text-[#8A8A9A] hover:bg-stone-200 dark:hover:bg-white/[0.06] hover:text-stone-900 dark:hover:text-[#EEEEF2] bg-transparent"
+      }`}
+    >
+      <span className="flex-shrink-0 opacity-70">{icon}</span>
+      {!collapsed && label}
+    </button>
+  )
+}
+
+function PopupItem({ icon, label, danger, onClick }: {
+  icon: React.ReactNode; label: string; danger?: boolean; onClick?: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2.5 px-3 py-2 text-[13px] transition-colors cursor-pointer bg-transparent border-none text-left ${
+        danger
+          ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10"
+          : "text-stone-700 dark:text-[#AEAEBE] hover:bg-stone-100 dark:hover:bg-white/[0.05]"
+      }`}
+    >
+      <span className="opacity-60 flex-shrink-0">{icon}</span>
+      {label}
+    </button>
+  )
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-[10px] text-stone-500 dark:text-[#8A8A9A] uppercase tracking-[0.08em] font-medium mb-3 m-0">
@@ -278,6 +317,8 @@ export default function DashboardPage() {
   const [depthData,   setDepthData]   = useState<DepthPoint[]>([])
   const [loading,     setLoading]     = useState(true)
   const [sessionsErr, setSessionsErr] = useState<string | null>(null)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   useEffect(() => {
     async function init() {
@@ -331,33 +372,149 @@ export default function DashboardPage() {
   const topDeferred = deferData[0]?.topic ?? "—"
 
   return (
-    <div className="min-h-screen bg-stone-50 dark:bg-[#0D0D0F] text-stone-900 dark:text-[#EEEEF2] font-sans">
+    <div className="min-h-screen bg-stone-50 dark:bg-[#0D0D0F] text-stone-900 dark:text-[#EEEEF2] font-sans flex">
 
-      {/* Header */}
-      <header className="sticky top-0 z-50 h-14 flex items-center justify-between px-8 border-b border-stone-200 dark:border-white/[0.06] bg-stone-50 dark:bg-[#0D0D0F]">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-[#7B61FF] flex items-center justify-center text-[13px] font-bold text-white">
-            O
-          </div>
-          <span className="font-bold text-[15px] tracking-tight">Ormify</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-stone-500 dark:text-[#8A8A9A]">{email ?? ""}</span>
-          <ThemeToggle />
+      {/* Sidebar */}
+      <aside className={`fixed top-0 left-0 h-screen flex flex-col bg-stone-100 dark:bg-[#0f0f0f] z-40 transition-all duration-300 ${sidebarOpen ? "w-[260px]" : "w-[52px]"}`}>
+
+        {/* Top: logo + toggle */}
+        <div className={`flex items-center h-14 flex-shrink-0 ${sidebarOpen ? "justify-between px-4" : "justify-center"}`}>
+          {sidebarOpen && (
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-[#7B61FF] flex items-center justify-center text-[13px] font-bold text-white flex-shrink-0">O</div>
+              <span className="font-bold text-[15px] tracking-tight">Ormify</span>
+            </div>
+          )}
           <button
-            onClick={async () => {
-              await supabase.auth.signOut()
-              router.push("/login")
-            }}
-            className="text-xs text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-white/[0.12] rounded-md px-2.5 py-1 cursor-pointer bg-transparent hover:text-stone-900 dark:hover:text-white transition-colors"
+            onClick={() => setSidebarOpen(v => !v)}
+            title={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 dark:text-[#8A8A9A] hover:bg-stone-200 dark:hover:bg-white/[0.08] transition-colors cursor-pointer bg-transparent border-none"
           >
-            Sign out
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M9 3v18"/>
+            </svg>
           </button>
         </div>
-      </header>
+
+        {/* Nav items */}
+        <nav className="flex flex-col gap-0.5 px-2 pt-1 flex-shrink-0">
+          <SidebarItem icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>}
+            label="Dashboard" active collapsed={!sidebarOpen} />
+          <SidebarItem icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>}
+            label="Search sessions" collapsed={!sidebarOpen} />
+          <SidebarItem icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>}
+            label="Analytics" onClick={() => setShowAnalytics(v => !v)} collapsed={!sidebarOpen} />
+          <SidebarItem icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>}
+            label="Depth checks" collapsed={!sidebarOpen} />
+          <SidebarItem icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>}
+            label="Schedule" collapsed={!sidebarOpen} />
+          <SidebarItem icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>}
+            label="New session" onClick={() => router.push("/session")} collapsed={!sidebarOpen} />
+        </nav>
+
+        {/* Pinned — upcoming sessions */}
+        {sidebarOpen && sessions.filter(s => s.status === "upcoming").length > 0 && (
+          <div className="px-3 mt-5 flex-shrink-0">
+            <p className="text-[11px] font-semibold text-stone-500 dark:text-[#555565] mb-1 px-1">Pinned</p>
+            {sessions.filter(s => s.status === "upcoming").slice(0, 3).map(s => (
+              <button
+                key={s.id}
+                onClick={() => router.push(`/study/${s.id}`)}
+                className="w-full text-left px-2 py-1.5 rounded-lg text-[13px] text-stone-700 dark:text-[#AEAEBE] hover:bg-stone-200 dark:hover:bg-white/[0.06] transition-colors truncate cursor-pointer bg-transparent border-none block"
+              >
+                📌 {s.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Recents — all sessions scrollable */}
+        <div className={`mt-4 flex-1 overflow-y-auto min-h-0 ${sidebarOpen ? "px-3" : "hidden"}`}>
+          <p className="text-[11px] font-semibold text-stone-500 dark:text-[#555565] mb-1 px-1">Recents</p>
+          {sessions.length === 0 ? (
+            <p className="text-[12px] text-stone-400 dark:text-[#555565] px-2 py-1">No sessions yet</p>
+          ) : (
+            sessions.map(s => {
+              const days = Math.max(0, Math.ceil((new Date(s.deadline).getTime() - Date.now()) / 86_400_000))
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => router.push(`/study/${s.id}`)}
+                  className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-stone-200 dark:hover:bg-white/[0.06] transition-colors cursor-pointer bg-transparent border-none group"
+                >
+                  <p className="text-[13px] text-stone-700 dark:text-[#AEAEBE] truncate m-0 leading-tight">{s.name}</p>
+                  <p className="text-[11px] text-stone-400 dark:text-[#555565] m-0 mt-0.5">
+                    {s.status === "completed" ? "Completed" : `${days}d left · ${s.topicsTotal} topics`}
+                  </p>
+                </button>
+              )
+            })
+          )}
+        </div>
+
+        {/* Bottom: profile button + popup */}
+        <div className="flex-shrink-0 border-t border-stone-200 dark:border-white/[0.06] px-2 py-2 relative">
+
+          {/* Profile popup — appears above when open */}
+          {profileOpen && (
+            <>
+              {/* backdrop */}
+              <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
+              <div className="absolute bottom-[calc(100%+4px)] left-2 right-2 z-20 bg-white dark:bg-[#1c1c1e] border border-stone-200 dark:border-white/[0.08] rounded-xl shadow-xl overflow-hidden py-1">
+                {/* user info header */}
+                <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-stone-100 dark:border-white/[0.06]">
+                  <div className="w-8 h-8 rounded-full bg-[#7B61FF] flex items-center justify-center text-[12px] font-bold text-white flex-shrink-0">
+                    {(email ?? "?")[0].toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold text-stone-900 dark:text-[#EEEEF2] truncate m-0 leading-tight">{email?.split("@")[0] ?? ""}</p>
+                    <p className="text-[11px] text-stone-400 dark:text-[#555565] truncate m-0">{email ?? ""}</p>
+                  </div>
+                </div>
+                {/* menu items */}
+                <PopupItem icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>} label="Profile" />
+                <PopupItem icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>} label="Settings" />
+                <PopupItem icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>} label="Help" />
+                {/* theme row */}
+                <div className="flex items-center gap-2.5 px-3 py-2 text-[13px] text-stone-700 dark:text-[#AEAEBE]">
+                  <span className="opacity-60"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></span>
+                  <span className="flex-1">Theme</span>
+                  <ThemeToggle />
+                </div>
+                <div className="border-t border-stone-100 dark:border-white/[0.06] mt-1 pt-1">
+                  <PopupItem
+                    icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>}
+                    label="Log out"
+                    danger
+                    onClick={async () => { await supabase.auth.signOut(); router.push("/login") }}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Profile trigger button */}
+          <button
+            onClick={() => setProfileOpen(v => !v)}
+            className={`w-full flex items-center rounded-lg hover:bg-stone-200 dark:hover:bg-white/[0.06] transition-colors cursor-pointer bg-transparent border-none ${sidebarOpen ? "gap-2.5 px-2 py-2 text-left" : "justify-center py-2"}`}
+          >
+            <div className="w-7 h-7 rounded-full bg-[#7B61FF] flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0">
+              {(email ?? "?")[0].toUpperCase()}
+            </div>
+            {sidebarOpen && <>
+              <p className="text-[13px] font-medium text-stone-800 dark:text-[#EEEEF2] truncate m-0 flex-1 min-w-0">
+                {email?.split("@")[0] ?? ""}
+              </p>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0 text-stone-400 dark:text-[#555565]"><path d="M7 15l5-5 5 5"/></svg>
+            </>}
+          </button>
+        </div>
+      </aside>
 
       {/* Main */}
-      <main className="max-w-[920px] mx-auto px-6 py-8">
+      <main className={`flex-1 min-h-screen transition-all duration-300 ${sidebarOpen ? "ml-[260px]" : "ml-[52px]"}`}>
+      <div className="max-w-[860px] mx-auto px-8 py-8">
 
         {/* Page header + New Session CTA */}
         <div className="flex justify-between items-start mb-7">
@@ -464,6 +621,7 @@ export default function DashboardPage() {
 
             </div>
           )}
+        </div>
         </div>
       </main>
     </div>

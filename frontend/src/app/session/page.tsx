@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, createContext, useContext } from "react"
+import { useState, useRef, useEffect, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "../../lib/theme"
 import { ThemeToggle } from "../../components/ThemeToggle"
@@ -366,6 +366,245 @@ function Step2({
   )
 }
 
+// ── DateTimePicker ────────────────────────────────────────────
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"]
+const DAYS_SHORT = ["Su","Mo","Tu","We","Th","Fr","Sa"]
+
+function DateTimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const C = useColors()
+  const [calOpen, setCalOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  const parsed  = value ? new Date(value) : null
+  const initH24 = parsed?.getHours() ?? 9
+  const init12  = initH24 === 0 ? 12 : initH24 > 12 ? initH24 - 12 : initH24
+
+  const fmtDDMMYY = (y: number, mo: number, d: number) =>
+    `${String(d).padStart(2,"0")}/${String(mo+1).padStart(2,"0")}/${String(y).slice(-2)}`
+
+  const [viewYear,  setViewYear]  = useState(parsed?.getFullYear() ?? new Date().getFullYear())
+  const [viewMonth, setViewMonth] = useState(parsed?.getMonth()    ?? new Date().getMonth())
+  const [selDate, setSelDate] = useState<{ y: number; m: number; d: number } | null>(
+    parsed ? { y: parsed.getFullYear(), m: parsed.getMonth(), d: parsed.getDate() } : null,
+  )
+  const [dateText, setDateText] = useState(
+    parsed ? fmtDDMMYY(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()) : ""
+  )
+  const [hour12, setHour12] = useState(init12)
+  const [minute, setMinute] = useState(
+    parsed ? Math.round(parsed.getMinutes() / 5) * 5 % 60 : 0
+  )
+  const [ampm, setAmpm] = useState<"AM"|"PM">(initH24 >= 12 ? "PM" : "AM")
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setCalOpen(false)
+    }
+    document.addEventListener("mousedown", h)
+    return () => document.removeEventListener("mousedown", h)
+  }, [])
+
+  const to24 = (h12: number, ap: "AM"|"PM") =>
+    ap === "AM" ? (h12 === 12 ? 0 : h12) : (h12 === 12 ? 12 : h12 + 12)
+
+  const emit = (y: number, mo: number, d: number, h12: number, mi: number, ap: "AM"|"PM") => {
+    const pad = (n: number) => String(n).padStart(2, "0")
+    onChange(`${y}-${pad(mo + 1)}-${pad(d)}T${pad(to24(h12, ap))}:${pad(mi)}`)
+  }
+
+  const applyDate = (y: number, mo: number, d: number) => {
+    setSelDate({ y, m: mo, d })
+    setViewYear(y); setViewMonth(mo)
+    setDateText(fmtDDMMYY(y, mo, d))
+    emit(y, mo, d, hour12, minute, ampm)
+  }
+
+  // Parse DD/MM/YY typed directly into the date field
+  const handleDateText = (v: string) => {
+    setDateText(v)
+    const p = v.split("/")
+    if (p.length === 3) {
+      const d  = parseInt(p[0])
+      const mo = parseInt(p[1]) - 1
+      let   y  = parseInt(p[2])
+      if (!isNaN(d) && !isNaN(mo) && !isNaN(y) && d >= 1 && d <= 31 && mo >= 0 && mo <= 11) {
+        if (y >= 0 && y < 100) y += 2000
+        if (y >= 2000) {
+          setSelDate({ y, m: mo, d })
+          setViewYear(y); setViewMonth(mo)
+          emit(y, mo, d, hour12, minute, ampm)
+        }
+      }
+    }
+  }
+
+  const handleHour = (h: number) => {
+    setHour12(h)
+    if (selDate) emit(selDate.y, selDate.m, selDate.d, h, minute, ampm)
+  }
+  const handleMinute = (mi: number) => {
+    setMinute(mi)
+    if (selDate) emit(selDate.y, selDate.m, selDate.d, hour12, mi, ampm)
+  }
+  const toggleAmpm = () => {
+    const ap = ampm === "AM" ? "PM" : "AM"
+    setAmpm(ap)
+    if (selDate) emit(selDate.y, selDate.m, selDate.d, hour12, minute, ap)
+  }
+
+  // Always 42 cells = fixed 6 rows regardless of month
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay()
+  const daysInMo = new Date(viewYear, viewMonth + 1, 0).getDate()
+  const today    = new Date()
+  const cells: Array<number | null> = []
+  for (let i = 0; i < firstDay; i++) cells.push(null)
+  for (let d = 1; d <= daysInMo; d++) cells.push(d)
+  while (cells.length < 42) cells.push(null)
+
+  const yearOpts   = Array.from({ length: 8 },  (_, i) => new Date().getFullYear() - 1 + i)
+  const hourOpts   = Array.from({ length: 12 }, (_, i) => i + 1)
+  const minuteOpts = Array.from({ length: 12 }, (_, i) => i * 5)
+
+  const sel: React.CSSProperties = {
+    background: C.surface, border: `1px solid ${C.border}`,
+    borderRadius: 6, padding: "3px 4px", fontSize: 12, color: C.text,
+    outline: "none", cursor: "pointer",
+  }
+
+  return (
+    <div ref={wrapRef}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+
+        {/* ── Date: text input + calendar icon ── */}
+        <div style={{ position: "relative", flex: 3 }}>
+          <div style={{
+            display: "flex", alignItems: "center", overflow: "hidden",
+            background: C.surface,
+            border: `1px solid ${calOpen ? C.violet : C.border}`,
+            borderRadius: 8, transition: "border-color 0.15s",
+          }}>
+            <input
+              value={dateText}
+              onChange={e => handleDateText(e.target.value)}
+              placeholder="DD/MM/YY"
+              maxLength={8}
+              style={{
+                flex: 1, background: "transparent", border: "none",
+                padding: "10px 12px", fontSize: 13, color: C.text,
+                outline: "none", minWidth: 0,
+              }}
+              onFocus={() => setCalOpen(true)}
+            />
+            <button
+              type="button"
+              onClick={() => setCalOpen(o => !o)}
+              title="Open calendar"
+              style={{
+                background: calOpen ? C.violet + "18" : "transparent",
+                border: "none", borderLeft: `1px solid ${C.border}`,
+                padding: "0 12px", alignSelf: "stretch", cursor: "pointer",
+                display: "flex", alignItems: "center",
+                color: calOpen ? C.violet : C.muted,
+                transition: "all 0.15s", flexShrink: 0,
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8"  y1="2" x2="8"  y2="6"/>
+                <line x1="3"  y1="10" x2="21" y2="10"/>
+              </svg>
+            </button>
+          </div>
+          <p style={{ fontSize: 10, color: C.hint, margin: "4px 0 0 2px" }}>
+            Type DD/MM/YY or click 📅
+          </p>
+
+          {/* Calendar dropdown */}
+          {calOpen && (
+            <div style={{
+              position: "absolute", top: "calc(100% + 2px)", left: 0, zIndex: 200,
+              background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 12, padding: "12px 14px 14px",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.28)",
+              width: 270,
+            }}>
+              {/* Month + Year selects */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                <select value={viewMonth} onChange={e => setViewMonth(Number(e.target.value))} style={{ ...sel, flex: 1 }}>
+                  {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                </select>
+                <select value={viewYear} onChange={e => setViewYear(Number(e.target.value))} style={{ ...sel, width: 68 }}>
+                  {yearOpts.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+
+              {/* Weekday headers */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 3 }}>
+                {DAYS_SHORT.map(d => (
+                  <div key={d} style={{ textAlign: "center", fontSize: 10, color: C.hint, fontWeight: 600, padding: "2px 0" }}>{d}</div>
+                ))}
+              </div>
+
+              {/* 42-cell grid — always 6 rows */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+                {cells.map((d, i) => {
+                  if (d === null) return <div key={`e${i}`} style={{ aspectRatio: "1" }} />
+                  const isSel   = !!(selDate && selDate.y === viewYear && selDate.m === viewMonth && selDate.d === d)
+                  const isToday = today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === d
+                  return (
+                    <button
+                      key={d} type="button"
+                      onClick={() => { applyDate(viewYear, viewMonth, d); setCalOpen(false) }}
+                      style={{
+                        width: "100%", aspectRatio: "1", borderRadius: 6, border: "none",
+                        cursor: "pointer", fontSize: 11,
+                        fontWeight: isSel || isToday ? 700 : 400,
+                        background: isSel ? C.violet : isToday ? C.violet + "22" : "transparent",
+                        color: isSel ? "#fff" : isToday ? C.violet : C.text,
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = C.violet + "28" }}
+                      onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = isToday ? C.violet + "22" : "transparent" }}
+                    >{d}</button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Time: always-visible selects + AM/PM ── */}
+        <div style={{ flex: 2 }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 5,
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 8, padding: "0 10px", height: 42, boxSizing: "border-box",
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.65 }}>
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <select value={hour12} onChange={e => handleHour(Number(e.target.value))} style={{ ...sel, minWidth: 44 }}>
+              {hourOpts.map(h => <option key={h} value={h}>{String(h).padStart(2,"0")}</option>)}
+            </select>
+            <span style={{ color: C.hint, fontWeight: 700, fontSize: 15, flexShrink: 0 }}>:</span>
+            <select value={minute} onChange={e => handleMinute(Number(e.target.value))} style={{ ...sel, minWidth: 44 }}>
+              {minuteOpts.map(m => <option key={m} value={m}>{String(m).padStart(2,"0")}</option>)}
+            </select>
+            <button type="button" onClick={toggleAmpm} style={{
+              background: C.violet + "20", border: `1px solid ${C.violet}55`,
+              borderRadius: 5, padding: "2px 6px", fontSize: 11, fontWeight: 700,
+              color: C.violet, cursor: "pointer", flexShrink: 0,
+            }}>{ampm}</button>
+          </div>
+          <p style={{ fontSize: 10, color: C.hint, margin: "4px 0 0 2px" }}>Time</p>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
 // ── Step 3: Deadline ──────────────────────────────────────────
 function Step3({
   topics, deadline, setDeadline, feasibility, setFeasibility,
@@ -397,19 +636,7 @@ function Step3({
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <Card>
         <FieldLabel>Exam or submission deadline</FieldLabel>
-        <input
-          type="datetime-local"
-          value={deadline}
-          onChange={e => onDeadlineChange(e.target.value)}
-          style={{
-            width: "100%", background: C.surface,
-            border: `1px solid ${C.border}`, borderRadius: 8,
-            padding: "10px 14px", fontSize: 13, color: C.text,
-            outline: "none", boxSizing: "border-box",
-          }}
-          onFocus={e => (e.target.style.borderColor = C.violet)}
-          onBlur={e  => (e.target.style.borderColor = C.border)}
-        />
+        <DateTimePicker value={deadline} onChange={onDeadlineChange} />
       </Card>
 
       {feasibility && deadline && (
