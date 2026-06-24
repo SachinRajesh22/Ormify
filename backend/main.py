@@ -250,7 +250,7 @@ Syllabus:
         topic_rows = []
         total_hours = 0
         for i, t in enumerate(topics):
-            total_hours += t.get("estimated_hours", 1)
+            total_hours += t.get("estimated_hours") or 1
             topic_rows.append({
                 "id": str(uuid.uuid4()),
                 "session_id": session_id,
