@@ -8,7 +8,6 @@ from supabase import create_client, Client
 from groq import Groq
 import chromadb
 from chromadb.utils import embedding_functions
-from sentence_transformers import SentenceTransformer
 import fitz  # PyMuPDF
 import uuid
 import os
@@ -52,8 +51,14 @@ def _chat(history: list, system: str | None = None) -> str:
     msgs = ([{"role": "system", "content": system}] if system else []) + history
     return _groq.chat.completions.create(model=_MODEL, messages=msgs).choices[0].message.content
 
-# local embedding model — no API cost
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+# lazy-load embedding model — import + model load deferred until first use
+_embedder = None
+def _get_embedder():
+    global _embedder
+    if _embedder is None:
+        from sentence_transformers import SentenceTransformer
+        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedder
 
 # chroma — persists to disk
 chroma_client = chromadb.PersistentClient(path="./chroma_store")
@@ -69,7 +74,7 @@ def get_or_create_collection(session_id: str):
 
 
 def embed(texts: list[str]) -> list[list[float]]:
-    return embedder.encode(texts, convert_to_numpy=True).tolist()
+    return _get_embedder().encode(texts, convert_to_numpy=True).tolist()
 
 
 def retrieve_chunks(session_id: str, query: str, n: int = 4) -> list[str]:

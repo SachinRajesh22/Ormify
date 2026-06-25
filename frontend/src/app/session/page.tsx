@@ -778,7 +778,8 @@ export default function NewSessionPage() {
         }
       }
 
-router.push(`/study/${session_id}`)    } catch (err) {
+      router.push(`/study/${session_id}`)
+    } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Something went wrong")
     } finally {
       setSubmitting(false)
