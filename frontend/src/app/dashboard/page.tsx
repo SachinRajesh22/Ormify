@@ -47,10 +47,12 @@ interface RawSession {
 }
 
 function mapSession(r: RawSession): StudySession {
-  const topics     = r.topics ?? []
-  const total      = topics.length
-  const done       = topics.filter(t => t.status === "completed").length
-  const isPast     = new Date(r.deadline) < new Date()
+  const topics   = r.topics ?? []
+  const total    = topics.length
+  const done     = topics.filter(t => t.status === "done").length
+  const started  = topics.filter(t => t.status === "in_progress" || t.status === "done").length
+  const isPast   = new Date(r.deadline) < new Date()
+  const status: SessionStatus = isPast ? "completed" : started > 0 ? "active" : "upcoming"
   return {
     id:           r.id,
     name:         r.title,
@@ -58,7 +60,7 @@ function mapSession(r: RawSession): StudySession {
     topicsTotal:  total,
     topicsDone:   done,
     readiness:    total > 0 ? Math.round((done / total) * 100) : 0,
-    status:       isPast ? "completed" : "upcoming",
+    status,
     avgDepth:     0,
     mostDeferred: null,
   }
@@ -229,7 +231,7 @@ function PaceLineChart({ data, isDark }: { data: PacePoint[]; isDark: boolean })
   const iH  = H - PAD.t - PAD.b
   const minV = 0, maxV = 2.2
 
-  const x = (i: number) => PAD.l + (i / (data.length - 1)) * iW
+  const x = (i: number) => data.length <= 1 ? PAD.l + iW / 2 : PAD.l + (i / (data.length - 1)) * iW
   const y = (v: number) => PAD.t + ((maxV - v) / (maxV - minV)) * iH
   const pts = data.map((d, i) => `${x(i).toFixed(1)},${y(d.ratio).toFixed(1)}`).join(" ")
   const refY = y(1)
@@ -365,9 +367,9 @@ export default function DashboardPage() {
 
   const activeSessions      = sessions.filter(s => s.status === "active").length
   const totalTopicsThisWeek = sessions.reduce((a, s) => a + s.topicsDone, 0)
-  const sessionsWithDepth   = sessions.filter(s => s.avgDepth > 0)
-  const avgDepth = sessionsWithDepth.length
-    ? Math.round(sessionsWithDepth.reduce((a, s) => a + s.avgDepth, 0) / sessionsWithDepth.length)
+  // depth scores are 1–3; convert to 0–100%
+  const avgDepth = depthData.length > 0
+    ? Math.round(depthData.reduce((a, d) => a + d.score, 0) / depthData.length / 3 * 100)
     : 0
   const topDeferred = deferData[0]?.topic ?? "—"
 
@@ -627,3 +629,4 @@ export default function DashboardPage() {
     </div>
   )
 }
+

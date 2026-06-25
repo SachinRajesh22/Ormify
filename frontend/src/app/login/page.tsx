@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
-import { ThemeToggle } from "../../components/ThemeToggle";
 
 type Mode = "login" | "signup";
 
@@ -47,9 +46,7 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-stone-50 dark:bg-stone-950 px-4 relative">
-      <div className="absolute top-4 right-4">
-        <ThemeToggle />
-      </div>
+
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold text-stone-900 dark:text-white tracking-tight">

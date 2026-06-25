@@ -1,13 +1,12 @@
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks
 
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
 from groq import Groq
 import chromadb
-from chromadb.utils import embedding_functions
 import fitz  # PyMuPDF
 import uuid
 import os
@@ -51,15 +50,6 @@ def _chat(history: list, system: str | None = None) -> str:
     msgs = ([{"role": "system", "content": system}] if system else []) + history
     return _groq.chat.completions.create(model=_MODEL, messages=msgs).choices[0].message.content
 
-# lazy-load embedding model — import + model load deferred until first use
-_embedder = None
-def _get_embedder():
-    global _embedder
-    if _embedder is None:
-        from sentence_transformers import SentenceTransformer
-        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
-    return _embedder
-
 # chroma — persists to disk
 chroma_client = chromadb.PersistentClient(path="./chroma_store")
 
@@ -73,17 +63,19 @@ def get_or_create_collection(session_id: str):
     )
 
 
-def embed(texts: list[str]) -> list[list[float]]:
-    return _get_embedder().encode(texts, convert_to_numpy=True).tolist()
-
-
 def retrieve_chunks(session_id: str, query: str, n: int = 4) -> list[str]:
-    col = get_or_create_collection(session_id)
-    results = col.query(
-        query_embeddings=embed([query]),
-        n_results=min(n, col.count() or 1),
-    )
-    return results["documents"][0] if results["documents"] else []
+    try:
+        col = get_or_create_collection(session_id)
+        count = col.count()
+        if count == 0:
+            return []
+        results = col.query(
+            query_texts=[query],
+            n_results=min(n, count),
+        )
+        return results["documents"][0] if results["documents"] else []
+    except Exception:
+        return []
 
 
 def compute_pace_ratio(session_id: str) -> float:
@@ -110,23 +102,32 @@ def remaining_projected_hours(session_id: str, deadline_str: str) -> dict:
         .eq("session_id", session_id)\
         .in_("status", ["pending", "in_progress"])\
         .execute().data
-    remaining_est = sum(t["estimated_hours"] for t in pending)
+    remaining_est = sum((t["estimated_hours"] or 1) for t in pending)
     projected = remaining_est * pace
     hours_left = hours_until_deadline(deadline_str)
+    if projected <= hours_left:
+        track = "green"
+    elif projected <= hours_left * 1.25:
+        track = "amber"
+    else:
+        track = "red"
+
+    projection_string = (
+        f"At your current pace (×{round(pace,2)}), "
+        f"remaining topics will take ~{round(projected,1)}h "
+        f"but you only have {round(hours_left,1)}h left."
+        if projected > hours_left else
+        f"You're on track. ~{round(projected,1)}h of work, "
+        f"{round(hours_left,1)}h remaining."
+    )
+
     return {
-        "pace_ratio": round(pace, 2),
+        "pace_ratio_avg": round(pace, 2),
         "remaining_estimated_hours": round(remaining_est, 2),
         "projected_hours_needed": round(projected, 2),
         "hours_until_deadline": round(hours_left, 2),
-        "on_track": projected <= hours_left,
-        "projection_message": (
-            f"At your current pace (×{round(pace,2)}), "
-            f"remaining topics will take ~{round(projected,1)}h "
-            f"but you only have {round(hours_left,1)}h left."
-            if projected > hours_left else
-            f"You're on track. ~{round(projected,1)}h of work, "
-            f"{round(hours_left,1)}h remaining."
-        )
+        "on_track": track,
+        "projection_string": projection_string,
     }
 
 
@@ -202,6 +203,16 @@ def add_topics(session_id: str, body: TopicsBody):
     return {"inserted": len(rows)}
 
 
+@app.get("/sessions/{session_id}/topics")
+def get_topics(session_id: str):
+    topics = supabase.table("topics")\
+        .select("*")\
+        .eq("session_id", session_id)\
+        .order("priority_order")\
+        .execute().data
+    return topics
+
+
 @app.delete("/sessions/{session_id}")
 def delete_session(session_id: str):
     supabase.table("topics").delete().eq("session_id", session_id).execute()
@@ -219,8 +230,17 @@ def get_session(session_id: str):
     return data.data
 
 
+def _index_chunks_background(session_id: str, chunks: list[str]):
+    """Runs after the response is returned — downloads onnx model if needed."""
+    try:
+        col = get_or_create_collection(session_id)
+        col.upsert(ids=[f"chunk_{i}" for i in range(len(chunks))], documents=chunks)
+    except Exception:
+        pass
+
+
 @app.post("/sessions/{session_id}/parse-syllabus")
-async def parse_syllabus(session_id: str, file: UploadFile = File(None), raw_text: str = Form("")):
+async def parse_syllabus(session_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(None), raw_text: str = Form("")):
     try:
         # Step 1 — extract text
         if file:
@@ -231,14 +251,10 @@ async def parse_syllabus(session_id: str, file: UploadFile = File(None), raw_tex
         if not raw_text.strip():
             raise HTTPException(400, "No text provided")
 
-        # Step 2 — chunk into sentences/paragraphs and store in Chroma
+        # Step 2 — chunk text; Chroma indexing runs after response (non-blocking)
         chunks = [p.strip() for p in raw_text.split("\n\n") if len(p.strip()) > 40]
-        col = get_or_create_collection(session_id)
-        col.upsert(
-            ids=[f"chunk_{i}" for i in range(len(chunks))],
-            documents=chunks,
-            embeddings=embed(chunks),
-        )
+        if chunks:
+            background_tasks.add_task(_index_chunks_background, session_id, chunks)
 
         # Step 3 — extract structured topic list via Groq
         prompt = f"""Extract a list of distinct learnable topics from this syllabus text.
@@ -297,12 +313,100 @@ Syllabus:
         raise HTTPException(500, f"Parse syllabus failed: {e}")
 
 
+# ── Study Material ────────────────────────────────────────
+
+@app.get("/topics/{topic_id}/study-material")
+def get_study_material(topic_id: str):
+    topic = supabase.table("topics").select("*").eq("id", topic_id).single().execute().data
+    session_data = supabase.table("sessions").select("raw_syllabus_text").eq("id", topic["session_id"]).single().execute().data
+
+    # RAG chunks grounded in their actual syllabus
+    chunks = retrieve_chunks(topic["session_id"], topic["name"], n=5)
+
+    # Fall back to raw syllabus text if Chroma has nothing yet
+    if chunks:
+        context = "\n\n".join(chunks)
+    elif session_data.get("raw_syllabus_text"):
+        context = session_data["raw_syllabus_text"][:3000]
+    else:
+        context = ""
+
+    context_block = f"\nCourse material from the student's syllabus:\n{context}\n" if context else ""
+
+    prompt = f"""You are creating study material for a student preparing for an exam. Topic: "{topic['name']}".
+{context_block}
+Generate structured study material as JSON with exactly these fields:
+- "overview": 2-3 sentence plain-English explanation of what this concept is and why it matters
+- "key_points": array of 4-6 concise bullet-point strings covering the most important aspects
+- "explanation": 2-3 paragraphs of clear, detailed explanation for exam preparation — specific, not generic
+- "examples": array of 2-3 concrete real-world examples or scenarios that illustrate the concept
+- "exam_focus": array of 2-3 specific question types or angles likely to appear in an exam
+
+{"Base your answer on the course material above. Be specific to this course, not generic." if context else "Generate accurate, exam-focused material for this topic."}
+Return ONLY valid JSON. No markdown fences."""
+
+    try:
+        data = json.loads(_generate_json(prompt))
+        data.setdefault("overview", f"Core study of {topic['name']}.")
+        data.setdefault("key_points", [])
+        data.setdefault("explanation", "")
+        data.setdefault("examples", [])
+        data.setdefault("exam_focus", [])
+        return data
+    except Exception:
+        return {
+            "overview": f"Core study of {topic['name']}.",
+            "key_points": [],
+            "explanation": "",
+            "examples": [],
+            "exam_focus": [],
+        }
+
+
+# ── Challenge Brief ────────────────────────────────────────
+
+@app.get("/topics/{topic_id}/challenge-brief")
+def get_challenge_brief(topic_id: str):
+    topic = supabase.table("topics").select("*").eq("id", topic_id).single().execute().data
+
+    chunks = retrieve_chunks(topic["session_id"], topic["name"], n=3)
+    context_block = ("\nRelevant syllabus content:\n" + "\n\n".join(chunks) + "\n") if chunks else ""
+
+    prompt = f"""You are helping a student prepare to study the topic "{topic['name']}".{context_block}
+Generate a Challenge Brief as JSON with exactly these fields:
+- "what_it_solves": one sentence — the real-world problem or need this concept addresses
+- "must_explain": array of exactly 3 short phrases — things the student must be able to explain from memory to truly understand this topic
+- "watch_out": one sentence — the single most common misconception or mistake students make about this topic
+
+Return ONLY valid JSON. No markdown, no explanation."""
+
+    try:
+        brief = json.loads(_generate_json(prompt))
+        # normalise — ensure required keys exist
+        brief.setdefault("what_it_solves", f"Understanding the core principles of {topic['name']}.")
+        brief.setdefault("must_explain", [f"What {topic['name']} is", "How it works", "When to use it"])
+        brief.setdefault("watch_out", f"Make sure you understand the distinctions unique to {topic['name']}.")
+        return brief
+    except Exception:
+        return {
+            "what_it_solves": f"Understanding the core principles of {topic['name']}.",
+            "must_explain": [f"What {topic['name']} is", "How it works", "When to use it"],
+            "watch_out": f"Make sure you understand the distinctions unique to {topic['name']}.",
+        }
+
+
 # ══════════════════════════════════════════════════════════
 # TASK 2 — Live Pace Tracker
 # ══════════════════════════════════════════════════════════
 
 class CompleteTopicBody(BaseModel):
     actual_minutes: int
+
+
+@app.patch("/topics/{topic_id}/start")
+def start_topic(topic_id: str):
+    supabase.table("topics").update({"status": "in_progress"}).eq("id", topic_id).execute()
+    return {"message": "Topic started"}
 
 
 @app.patch("/topics/{topic_id}/complete")
@@ -380,7 +484,7 @@ def get_graveyard(session_id: str):
         .eq("status", "deferred")\
         .execute().data
 
-    total_deferred_hours = sum(t["estimated_hours"] for t in deferred)
+    total_deferred_hours = sum((t["estimated_hours"] or 1) for t in deferred)
     pct_runway_left = (hours_left / max(hours_left + total_deferred_hours, 1)) * 100
 
     if pct_runway_left > 50:
@@ -436,6 +540,21 @@ class DepthCheckComplete(BaseModel):
     level_reached: int
     student_explanation: str
     conversation_history: list
+
+
+@app.get("/sessions/{session_id}/depth-scores")
+def get_depth_scores(session_id: str):
+    """Returns latest depth score per topic for this session."""
+    checks = supabase.table("depth_checks")\
+        .select("topic_id, score, checked_at")\
+        .eq("session_id", session_id)\
+        .order("checked_at", desc=True)\
+        .execute().data
+    latest: dict = {}
+    for c in checks:
+        if c["topic_id"] not in latest:
+            latest[c["topic_id"]] = c["score"]
+    return latest
 
 
 @app.post("/topics/{topic_id}/depth-check/start")
@@ -522,7 +641,7 @@ def get_session_context(session_id: str):
         .execute().data
     return {
         "current_topic": current_topic[0]["name"] if current_topic else None,
-        "pace_ratio": pace["pace_ratio"],
+        "pace_ratio": pace["pace_ratio_avg"],
         "hours_remaining": pace["hours_until_deadline"],
         "projected_hours_needed": pace["projected_hours_needed"],
         "on_track": pace["on_track"],
@@ -542,34 +661,38 @@ def bubble_chat(session_id: str, body: BubbleChat):
     rag_chunks = retrieve_chunks(session_id, body.message)
     rag_context = "\n\n".join(rag_chunks) if rag_chunks else ""
 
-    system = f"""You are SocraBot, an always-on study assistant. Be concise and direct.
+    system = f"""You are SocraBot, a sharp and honest study assistant built into a study app called Ormify.
+You have real data about the student's session. Use it. Never be vague or generic.
 
-Current session status:
-- Current topic: {ctx['current_topic'] or 'None set'}
-- Pace ratio: {ctx['pace_ratio']} (1.0 = on estimate, >1.0 = slower than expected)
-- Hours remaining until deadline: {ctx['hours_remaining']}
-- Projected hours needed: {ctx['projected_hours_needed']}
-- On track: {ctx['on_track']}
+Session context:
+- Current topic being studied: {ctx['current_topic'] or 'none selected yet'}
+- Pace multiplier: {ctx['pace_ratio']}x (1.0 = on pace, >1.0 = taking longer than estimated)
+- Hours left until deadline: {ctx['hours_remaining']}h
+- Projected hours needed to finish: {ctx['projected_hours_needed']}h
+- Status: {'On track' if ctx['on_track'] == 'green' else 'Slightly behind' if ctx['on_track'] == 'amber' else 'Behind — needs attention'}
 - Deferred topics: {ctx['deferred_count']}
 
-Relevant curriculum context:
-{rag_context}
+{'Relevant syllabus excerpts:' + chr(10) + rag_context if rag_context else 'No syllabus context loaded yet.'}
 
-Answer based on this real data. Never give generic responses."""
+Respond like a knowledgeable friend: direct, specific, honest. Use the session data above when relevant.
+If asked about a concept, explain it clearly. If asked about pace or planning, use the numbers above."""
 
     history = body.conversation_history + [{"role": "user", "content": body.message}]
 
     reply = _chat(history, system)
     history.append({"role": "assistant", "content": reply})
 
-    supabase.table("bubble_chat_logs").insert({
-        "id": str(uuid.uuid4()),
-        "session_id": session_id,
-        "role": "assistant",
-        "content": reply,
-        "context_snapshot": ctx,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }).execute()
+    try:
+        supabase.table("bubble_chat_logs").insert({
+            "id": str(uuid.uuid4()),
+            "session_id": session_id,
+            "role": "assistant",
+            "content": reply,
+            "context_snapshot": json.dumps(ctx),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+    except Exception:
+        pass  # logging is optional — don't fail the response
 
     return {"reply": reply, "conversation_history": history}
 

@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, createContext, useContext } from "react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "../../lib/theme"
-import { ThemeToggle } from "../../components/ThemeToggle"
 import { supabase } from "../../lib/supabase"
 import { API } from "../../lib/api"
 
@@ -811,7 +810,6 @@ export default function NewSessionPage() {
             <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em", color: C.text }}>Ormify</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <ThemeToggle />
             <button
               onClick={() => router.push("/dashboard")}
               style={{
