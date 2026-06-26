@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { SocraBotGlobal } from "../components/SocraBot.tsx";
+import { SocraBotGlobal } from "../components/SocraBot";
 import { ThemeProvider } from "../lib/theme";
 
 const geistSans = Geist({

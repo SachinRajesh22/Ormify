@@ -83,13 +83,13 @@ function formatDeadline(deadline: string): string {
   })
 }
 
-function LineIcon({ name }: { name: "grid" | "search" | "chart" | "edit" | "calendar" | "plus" | "panel" | "logout" | "user" | "settings" | "help" | "spark" }) {
+function LineIcon({ name }: { name: "grid" | "search" | "chart" | "archive" | "calendar" | "plus" | "panel" | "logout" | "user" | "settings" | "help" | "spark" }) {
   const common = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const }
   const paths: Record<typeof name, React.ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
     chart: <><path d="M4 19V5" /><path d="M4 19h16" /><path d="m7 14 4-4 4 3 5-7" /></>,
-    edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></>,
+    archive: <><path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></>,
     calendar: <><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
     panel: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></>,
@@ -521,9 +521,9 @@ export default function DashboardPage() {
 
         <nav className="flex flex-col gap-1 px-3" aria-label="Dashboard navigation">
           <SidebarItem icon={<LineIcon name="grid" />}     label="Dashboard"     active collapsed={!sidebarOpen} />
-          <SidebarItem icon={<LineIcon name="search" />}   label="Search sessions" collapsed={!sidebarOpen} />
+          <SidebarItem icon={<LineIcon name="search" />}   label="Search sessions" onClick={() => router.push("/search-sessions")} collapsed={!sidebarOpen} />
           <SidebarItem icon={<LineIcon name="chart" />}    label="Analytics"     onClick={() => setShowAnalytics(v => !v)} collapsed={!sidebarOpen} />
-          <SidebarItem icon={<LineIcon name="edit" />}     label="Depth checks"  collapsed={!sidebarOpen} />
+          <SidebarItem icon={<LineIcon name="archive" />}  label="Graveyard"     onClick={() => router.push("/graveyard")} collapsed={!sidebarOpen} />
           <SidebarItem icon={<LineIcon name="calendar" />} label="Schedule"      onClick={() => router.push("/schedule")} collapsed={!sidebarOpen} />
           <SidebarItem icon={<LineIcon name="plus" />}     label="New session"   onClick={() => router.push("/session")} collapsed={!sidebarOpen} />
         </nav>
@@ -583,7 +583,7 @@ export default function DashboardPage() {
                     <p className="truncate text-xs text-zinc-500">{displayEmail}</p>
                   </div>
                 </div>
-                <PopupItem icon={<LineIcon name="user" />}     label="Profile" />
+                <PopupItem icon={<LineIcon name="user" />}     label="Profile" onClick={() => router.push("/profile")} />
                 <PopupItem icon={<LineIcon name="settings" />} label="Settings" />
                 <PopupItem icon={<LineIcon name="help" />}     label="Help" />
                 <div className="flex items-center gap-3 px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
