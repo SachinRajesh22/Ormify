@@ -32,11 +32,6 @@ interface SessionData {
   feasibility_verdict: string | null;
 }
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
 interface ChallengeBrief {
   what_it_solves: string;
   must_explain: string[];
@@ -214,10 +209,10 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-[#1C1C1F] rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+      <div className="orm-panel orm-panel-violet rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
 
         {/* Header — always has a close button */}
-        <div className="px-6 py-5 border-b border-gray-100 dark:border-white/10 flex items-start justify-between gap-4">
+        <div className="px-6 py-5 border-b border-zinc-200/70 dark:border-white/10 flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1">
               Depth check · {topicName}
@@ -242,9 +237,9 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
           {/* Loading */}
           {phase === "loading" && !error && (
             <div className="space-y-3 py-4">
-              <div className="h-4 bg-gray-100 dark:bg-white/10 rounded animate-pulse w-3/4" />
-              <div className="h-4 bg-gray-100 dark:bg-white/10 rounded animate-pulse w-full" />
-              <div className="h-4 bg-gray-100 dark:bg-white/10 rounded animate-pulse w-2/3" />
+              <div className="h-4 bg-zinc-200 dark:bg-white/10 rounded animate-pulse w-3/4" />
+              <div className="h-4 bg-zinc-200 dark:bg-white/10 rounded animate-pulse w-full" />
+              <div className="h-4 bg-zinc-200 dark:bg-white/10 rounded animate-pulse w-2/3" />
               <p className="text-xs text-gray-400 dark:text-gray-500 pt-2 text-center">Generating questions…</p>
             </div>
           )}
@@ -268,9 +263,9 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
           {phase === "quiz" && q && (
             <>
               {/* Progress bar */}
-              <div className="h-1 bg-gray-100 dark:bg-white/10 rounded-full overflow-hidden">
+              <div className="h-1 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-purple-500 rounded-full transition-all duration-300"
+                  className="h-full bg-[#7B61FF] rounded-full transition-all duration-300 shadow-[0_0_14px_rgba(123,97,255,0.8)]"
                   style={{ width: `${((current) / questions.length) * 100}%` }}
                 />
               </div>
@@ -285,13 +280,13 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
                 {q.options.map((opt, i) => {
                   const isSelected  = selected === i;
                   const isRight     = i === q.correct_index;
-                  let cls = "border border-gray-200 dark:border-white/15 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/5";
+                  let cls = "border border-zinc-200 dark:border-white/15 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/5";
                   if (revealed) {
                     if (isRight)           cls = "border border-emerald-300 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-200";
                     else if (isSelected)   cls = "border border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300";
                     else                   cls = "border border-gray-100 dark:border-white/10 text-gray-400 dark:text-gray-600";
                   } else if (isSelected) {
-                    cls = "border-2 border-purple-500 bg-purple-50 dark:bg-purple-900/20 text-purple-900 dark:text-purple-100";
+                    cls = "border-2 border-[#7B61FF] bg-[#7B61FF]/10 text-[#7B61FF] dark:text-purple-100";
                   }
                   return (
                     <button
@@ -326,14 +321,14 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
                 <button
                   onClick={handleReveal}
                   disabled={selected === null}
-                  className="w-full bg-purple-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-purple-700 disabled:opacity-40 transition-colors"
+                  className="orm-primary w-full rounded-xl py-3 text-sm font-medium disabled:opacity-40 transition"
                 >
                   Check answer
                 </button>
               ) : (
                 <button
                   onClick={handleNext}
-                  className="w-full bg-purple-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-purple-700 transition-colors"
+                  className="orm-primary w-full rounded-xl py-3 text-sm font-medium transition"
                 >
                   {current < questions.length - 1 ? "Next question →" : "See results →"}
                 </button>
@@ -345,7 +340,7 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
           {phase === "result" && scoreLabel && score !== null && (
             <div className="space-y-4">
               {/* Score badge */}
-              <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-white/5 rounded-xl">
+              <div className="flex items-center gap-3 p-4 bg-zinc-100 dark:bg-white/5 rounded-xl">
                 <span className={`text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${scoreLabel.cls}`}>
                   {scoreLabel.label}
                 </span>
@@ -374,7 +369,7 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
 
               <button
                 onClick={onClose}
-                className="w-full bg-purple-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-purple-700 transition-colors"
+                className="orm-primary w-full rounded-xl py-3 text-sm font-medium transition"
               >
                 Continue studying →
               </button>
@@ -384,108 +379,6 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
         </div>
       </div>
     </div>
-  );
-}
-
-// ─── SocraBot Bubble ─────────────────────────────────────────────────────────
-
-function SocraBotBubble({ sessionId }: { sessionId: string }) {
-  const [open, setOpen]       = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "Hey! Ask me anything — your pace, a concept, what to study next." },
-  ]);
-  const [input, setInput]     = useState("");
-  const [loading, setLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, open]);
-
-  async function send() {
-    if (!input.trim() || loading) return;
-    const userMsg: ChatMessage = { role: "user", content: input };
-    const updated = [...messages, userMsg];
-    setMessages(updated);
-    setInput("");
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/sessions/${sessionId}/bubble/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: input, conversation_history: updated }),
-      });
-      const data = await res.json();
-      setMessages([...updated, { role: "assistant", content: data.reply }]);
-    } catch {
-      setMessages([...updated, { role: "assistant", content: "Something went wrong. Try again." }]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <>
-      {open && (
-        <div
-          className="fixed bottom-20 right-4 w-80 bg-white dark:bg-[#1C1C1F] rounded-2xl shadow-2xl border border-gray-100 dark:border-white/10 z-40 flex flex-col overflow-hidden"
-          style={{ height: "420px" }}
-        >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-white/10 bg-purple-600">
-            <span className="text-white font-semibold text-sm">SocraBot</span>
-            <button onClick={() => setOpen(false)} className="text-purple-200 hover:text-white text-lg leading-none">
-              ×
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[85%] text-sm px-3 py-2 rounded-xl leading-relaxed ${
-                    m.role === "user"
-                      ? "bg-purple-600 text-white rounded-br-sm"
-                      : "bg-gray-100 dark:bg-white/10 text-gray-800 dark:text-gray-200 rounded-bl-sm"
-                  }`}
-                >
-                  {m.content}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-gray-100 dark:bg-white/10 text-gray-400 dark:text-gray-500 text-sm px-3 py-2 rounded-xl rounded-bl-sm">
-                  <span className="animate-pulse">Thinking...</span>
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </div>
-          <div className="border-t border-gray-100 dark:border-white/10 p-2 flex gap-2">
-            <input
-              className="flex-1 text-sm bg-gray-50 dark:bg-white/5 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-400 placeholder:text-gray-400 dark:placeholder:text-gray-600"
-              placeholder="Ask anything..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && send()}
-            />
-            <button
-              onClick={send}
-              disabled={loading}
-              className="bg-purple-600 text-white rounded-lg px-3 text-sm hover:bg-purple-700 disabled:opacity-50 transition-colors"
-            >
-              →
-            </button>
-          </div>
-        </div>
-      )}
-
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-4 right-4 w-12 h-12 bg-purple-600 text-white rounded-full shadow-lg flex items-center justify-center text-sm font-semibold hover:bg-purple-700 transition-all z-40 hover:scale-105"
-      >
-        AI
-      </button>
-    </>
   );
 }
 
@@ -559,25 +452,30 @@ export default function StudyPage() {
   }, [sessionId]);
 
   useEffect(() => {
-    if (sessionId) fetchAll();
+    if (!sessionId) return;
+    void Promise.resolve().then(fetchAll);
   }, [sessionId, fetchAll]);
 
   // ── Challenge Brief + Study Material ─────────────────────────────────────
   useEffect(() => {
     if (!activeTopicId) return;
     if (!briefs[activeTopicId]) {
-      setBriefs((prev) => ({ ...prev, [activeTopicId]: "loading" }));
-      fetch(`${API_BASE}/topics/${activeTopicId}/challenge-brief`)
-        .then((r) => r.json())
-        .then((data) => setBriefs((prev) => ({ ...prev, [activeTopicId]: data })))
-        .catch(() => setBriefs((prev) => ({ ...prev, [activeTopicId]: "error" })));
+      void Promise.resolve().then(() => {
+        setBriefs((prev) => ({ ...prev, [activeTopicId]: "loading" }));
+        fetch(`${API_BASE}/topics/${activeTopicId}/challenge-brief`)
+          .then((r) => r.json())
+          .then((data) => setBriefs((prev) => ({ ...prev, [activeTopicId]: data })))
+          .catch(() => setBriefs((prev) => ({ ...prev, [activeTopicId]: "error" })));
+      });
     }
     if (!studyMaterials[activeTopicId]) {
-      setStudyMaterials((prev) => ({ ...prev, [activeTopicId]: "loading" }));
-      fetch(`${API_BASE}/topics/${activeTopicId}/study-material`)
-        .then((r) => r.json())
-        .then((data) => setStudyMaterials((prev) => ({ ...prev, [activeTopicId]: data })))
-        .catch(() => setStudyMaterials((prev) => ({ ...prev, [activeTopicId]: "error" })));
+      void Promise.resolve().then(() => {
+        setStudyMaterials((prev) => ({ ...prev, [activeTopicId]: "loading" }));
+        fetch(`${API_BASE}/topics/${activeTopicId}/study-material`)
+          .then((r) => r.json())
+          .then((data) => setStudyMaterials((prev) => ({ ...prev, [activeTopicId]: data })))
+          .catch(() => setStudyMaterials((prev) => ({ ...prev, [activeTopicId]: "error" })));
+      });
     }
   }, [activeTopicId, briefs, studyMaterials]);
 
@@ -650,40 +548,40 @@ export default function StudyPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-[#0D0D0F] flex items-center justify-center">
-        <div className="text-gray-400 text-sm">Loading session...</div>
+      <div className="orm-bg min-h-screen flex items-center justify-center">
+        <div className="orm-panel orm-panel-violet rounded-2xl px-6 py-5 text-zinc-400 text-sm">Loading session...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-[#0D0D0F] text-gray-900 dark:text-white">
+    <div className="orm-bg min-h-screen flex flex-col text-zinc-950 dark:text-white">
 
       {/* ── Top nav ─────────────────────────────────────────────────────────── */}
-      <header className="h-14 bg-white dark:bg-[#141416] border-b border-gray-100 dark:border-white/10 flex items-center justify-between px-4 flex-shrink-0 z-10">
+      <header className="h-16 bg-white/75 dark:bg-[#0f0f0f]/80 backdrop-blur-xl border-b border-zinc-200/70 dark:border-white/10 flex items-center justify-between px-5 flex-shrink-0 z-10">
         <div className="flex items-center gap-3">
           {session?.title && (
-            <span className="font-semibold text-sm text-gray-900 dark:text-white truncate max-w-[200px]">
+            <span className="font-semibold text-sm text-zinc-950 dark:text-white truncate max-w-[240px]">
               {session.title}
             </span>
           )}
           {session?.deadline && (
-            <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-white/10 px-2.5 py-1 rounded-full font-medium">
+            <span className="text-xs text-zinc-500 dark:text-zinc-300 bg-zinc-100 dark:bg-white/10 px-3 py-1 rounded-full font-medium">
               {formatCountdown(session.deadline)} left
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 dark:text-gray-400">{email ?? ""}</span>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">{email ?? ""}</span>
           <button
             onClick={() => router.push("/dashboard")}
-            className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 border border-gray-200 dark:border-white/15 px-3 py-1.5 rounded-lg transition-colors"
+            className="orm-ghost text-xs px-3 py-2 rounded-lg transition"
           >
             Dashboard
           </button>
           <button
             onClick={async () => { await supabase.auth.signOut(); router.push("/login"); }}
-            className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 border border-gray-200 dark:border-white/15 px-3 py-1.5 rounded-lg transition-colors"
+            className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border border-zinc-200 dark:border-white/15 px-3 py-2 rounded-lg transition-colors"
           >
             Sign out
           </button>
@@ -693,15 +591,15 @@ export default function StudyPage() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Left sidebar ─────────────────────────────────────────────────── */}
-        <aside className="w-64 bg-white dark:bg-[#141416] border-r border-gray-100 dark:border-white/10 flex flex-col flex-shrink-0 overflow-hidden">
+        <aside className="w-72 bg-[#0f0f0f] border-r border-white/10 flex flex-col flex-shrink-0 overflow-hidden text-white">
           {/* Pace health strip */}
-          <div className="px-4 py-3 border-b border-gray-100 dark:border-white/10">
+          <div className="px-4 py-4 border-b border-white/10">
             {pace ? (
               <PaceBar on_track={pace.on_track} />
             ) : (
-              <div className="text-xs text-gray-400">Loading pace...</div>
+              <div className="text-xs text-zinc-500">Loading pace...</div>
             )}
-            <div className="mt-2 flex gap-3 text-xs text-gray-500 dark:text-gray-400">
+            <div className="mt-3 flex gap-3 text-xs text-zinc-500">
               <span>{doneCount} done</span>
               {deferredCount > 0 && <span>{deferredCount} deferred</span>}
               <span>{pendingCount} left</span>
@@ -710,7 +608,7 @@ export default function StudyPage() {
 
           {/* Topics list */}
           <div className="flex-1 overflow-y-auto py-2">
-            <p className="px-4 pb-2 text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium">
+            <p className="px-4 pb-2 text-[10px] uppercase tracking-widest text-zinc-600 font-medium">
               Topics · {topics.length}
             </p>
             {topics.map((topic, i) => (
@@ -719,25 +617,25 @@ export default function StudyPage() {
                 onClick={() => handleTopicSwitch(topic.id)}
                 className={`group relative px-3 py-2.5 cursor-pointer transition-colors border-r-2 ${
                   topic.id === activeTopicId
-                    ? "bg-purple-50 dark:bg-purple-900/20 border-purple-500"
-                    : "hover:bg-gray-50 dark:hover:bg-white/5 border-transparent"
+                    ? "bg-[#7B61FF]/15 border-[#7B61FF]"
+                    : "hover:bg-white/5 border-transparent"
                 }`}
               >
                 <div className="flex items-start gap-2">
-                  <span className="text-[10px] text-gray-400 dark:text-gray-600 font-mono mt-0.5 w-4 flex-shrink-0">
+                  <span className="text-[10px] text-zinc-600 font-mono mt-0.5 w-4 flex-shrink-0">
                     {i + 1}.
                   </span>
                   <div className="flex-1 min-w-0 pr-7">
                     <p className={`text-[13px] leading-snug ${
                       topic.id === activeTopicId
-                        ? "text-purple-700 dark:text-purple-300 font-semibold"
-                        : "text-gray-800 dark:text-gray-200"
-                    } ${topic.status === "deferred" ? "line-through text-gray-400 dark:text-gray-600" : ""}`}>
+                        ? "text-purple-200 font-semibold"
+                        : "text-zinc-300"
+                    } ${topic.status === "deferred" ? "line-through text-zinc-600" : ""}`}>
                       {topic.name}
                     </p>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       <StatusBadge status={topic.status} />
-                      <span className="text-[9px] text-gray-400 dark:text-gray-500">~{topic.estimated_hours}h</span>
+                      <span className="text-[9px] text-zinc-600">~{topic.estimated_hours}h</span>
                       {depthScores[topic.id] != null && (
                         <ReadinessScore score={depthScores[topic.id]} />
                       )}
@@ -748,7 +646,7 @@ export default function StudyPage() {
                 <button
                   onClick={(e) => { e.stopPropagation(); setDepthCheckTopic(topic); }}
                   title="Check readiness"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-[10px] bg-purple-100 dark:bg-purple-800/40 text-purple-700 dark:text-purple-300 px-2 py-1 rounded-full font-semibold transition-opacity hover:bg-purple-200 dark:hover:bg-purple-700/40"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 text-[10px] bg-[#7B61FF]/25 text-purple-100 px-2 py-1 rounded-full font-semibold transition-opacity hover:bg-[#7B61FF]/40"
                 >
                   Quiz
                 </button>
@@ -758,10 +656,10 @@ export default function StudyPage() {
 
           {/* Graveyard link */}
           {deferredCount > 0 && (
-            <div className="border-t border-gray-100 dark:border-white/10 p-3">
+            <div className="border-t border-white/10 p-3">
               <button
                 onClick={() => router.push(`/graveyard/${sessionId}`)}
-                className="w-full flex items-center gap-2 text-xs text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 font-medium"
+                className="w-full flex items-center gap-2 text-xs text-red-400 hover:text-red-300 font-medium"
               >
                 <span>{deferredCount} deferred — view graveyard →</span>
               </button>
@@ -775,12 +673,12 @@ export default function StudyPage() {
           {/* Pace projection banner */}
           {pace && (
             <div
-              className={`rounded-xl px-4 py-3 text-sm font-medium border ${
+              className={`orm-panel rounded-xl px-4 py-3 text-sm font-medium ${
                 pace.on_track === "green"
-                  ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300"
+                  ? "text-emerald-700 dark:text-emerald-300"
                   : pace.on_track === "amber"
-                  ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/40 text-amber-800 dark:text-amber-300"
-                  : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/40 text-red-800 dark:text-red-300"
+                  ? "orm-panel-amber text-amber-700 dark:text-amber-300"
+                  : "orm-panel-red text-red-700 dark:text-red-300"
               }`}
             >
               {pace.projection_string}
@@ -789,16 +687,16 @@ export default function StudyPage() {
 
           {/* Active topic card */}
           {activeTopic ? (
-            <div className="bg-white dark:bg-[#141416] rounded-2xl border border-gray-100 dark:border-white/10 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-50 dark:border-white/10">
+            <div className="orm-panel rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-zinc-200/70 dark:border-white/10">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1">
+                    <p className="text-xs uppercase tracking-widest text-zinc-400 dark:text-zinc-500 font-medium mb-1">
                       Active topic
                     </p>
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{activeTopic.name}</h2>
+                    <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">{activeTopic.name}</h2>
                   </div>
-                  <span className="text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-white/5 px-2.5 py-1 rounded-full">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-white/5 px-2.5 py-1 rounded-full">
                     ~{activeTopic.estimated_hours}h estimated
                   </span>
                 </div>
@@ -809,16 +707,16 @@ export default function StudyPage() {
                 const brief = activeTopicId ? briefs[activeTopicId] : undefined;
                 if (!brief || brief === "error") return null;
                 if (brief === "loading") return (
-                  <div className="px-6 py-4 border-b border-gray-50 dark:border-white/10">
+                  <div className="px-6 py-4 border-b border-zinc-200/70 dark:border-white/10">
                     <p className="text-xs uppercase tracking-widest text-purple-400 font-medium mb-2">Challenge brief</p>
                     <div className="space-y-2">
-                      <div className="h-3 bg-gray-100 dark:bg-white/10 rounded animate-pulse w-3/4" />
-                      <div className="h-3 bg-gray-100 dark:bg-white/10 rounded animate-pulse w-1/2" />
+                      <div className="h-3 bg-zinc-200 dark:bg-white/10 rounded animate-pulse w-3/4" />
+                      <div className="h-3 bg-zinc-200 dark:bg-white/10 rounded animate-pulse w-1/2" />
                     </div>
                   </div>
                 );
                 return (
-                  <div className="px-6 py-4 border-b border-gray-50 dark:border-white/10 bg-purple-50/40 dark:bg-purple-900/10">
+                  <div className="px-6 py-4 border-b border-zinc-200/70 dark:border-white/10 bg-[#7B61FF]/10">
                     <p className="text-xs uppercase tracking-widest text-purple-500 dark:text-purple-400 font-semibold mb-3">
                       Challenge brief
                     </p>
@@ -859,10 +757,10 @@ export default function StudyPage() {
                 if (!mat || mat === "error") return null;
                 const isLoading = mat === "loading";
                 return (
-                  <div className="border-b border-gray-50 dark:border-white/10">
+                  <div className="border-b border-zinc-200/70 dark:border-white/10">
                     <button
                       onClick={() => setMaterialExpanded((e) => !e)}
-                      className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                      className="w-full px-6 py-3 flex items-center justify-between hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors"
                     >
                       <span className="text-xs uppercase tracking-widest text-indigo-500 dark:text-indigo-400 font-semibold">
                         Study material
@@ -879,7 +777,7 @@ export default function StudyPage() {
                             {[0.9, 0.7, 0.85, 0.6].map((w, i) => (
                               <div
                                 key={i}
-                                className="h-3 bg-gray-100 dark:bg-white/10 rounded animate-pulse"
+                                className="h-3 bg-zinc-200 dark:bg-white/10 rounded animate-pulse"
                                 style={{ width: `${w * 100}%` }}
                               />
                             ))}
@@ -951,11 +849,11 @@ export default function StudyPage() {
               })()}
 
               {/* Timer */}
-              <div className="px-6 py-5 border-b border-gray-50 dark:border-white/10">
+              <div className="px-6 py-5 border-b border-zinc-200/70 dark:border-white/10">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">Time on this topic</p>
-                    <p className="text-3xl font-mono font-bold text-gray-900 dark:text-white tracking-tight">
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-1">Time on this topic</p>
+                    <p className="text-3xl font-mono font-bold text-zinc-950 dark:text-white tracking-tight">
                       {formatTimer(timerSeconds)}
                     </p>
                   </div>
@@ -973,8 +871,8 @@ export default function StudyPage() {
                     }}
                     className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                       timerRunning
-                        ? "bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/15"
-                        : "bg-purple-600 text-white hover:bg-purple-700"
+                        ? "bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-white/15"
+                        : "orm-primary"
                     }`}
                   >
                     {timerRunning ? "Pause" : "Start timer"}
@@ -987,19 +885,19 @@ export default function StudyPage() {
                 <button
                   onClick={markDone}
                   disabled={markDoneLoading}
-                  className="flex-1 bg-emerald-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-60"
+                  className="flex-1 rounded-xl bg-[#10CFA8] py-3 text-sm font-semibold text-white shadow-[0_0_18px_rgba(16,207,168,0.35)] transition hover:opacity-90 disabled:opacity-60"
                 >
                   {markDoneLoading ? "Saving…" : "Mark done"}
                 </button>
                 <button
                   onClick={deferTopic}
-                  className="flex-1 border border-red-200 dark:border-red-800/50 text-red-600 dark:text-red-400 rounded-xl py-3 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  className="flex-1 rounded-xl border border-red-500/30 bg-red-500/10 py-3 text-sm font-semibold text-red-500 transition hover:bg-red-500/15"
                 >
                   Defer
                 </button>
                 <button
                   onClick={() => activeTopic && setDepthCheckTopic(activeTopic)}
-                  className="flex-1 border border-purple-200 dark:border-purple-800/50 text-purple-600 dark:text-purple-400 rounded-xl py-3 text-sm font-medium hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                  className="orm-ghost flex-1 rounded-xl py-3 text-sm font-semibold transition"
                 >
                   Check readiness
                 </button>
@@ -1008,7 +906,7 @@ export default function StudyPage() {
               {/* Readiness score row */}
               {activeTopic && depthScores[activeTopic.id] != null && (
                 <div className="px-6 pb-4">
-                  <div className="rounded-xl bg-gray-50 dark:bg-white/5 px-4 py-2.5 flex items-center gap-3">
+                  <div className="rounded-xl bg-zinc-100 dark:bg-white/5 px-4 py-2.5 flex items-center gap-3">
                     <ReadinessScore score={depthScores[activeTopic.id]} />
                     <span className="text-xs text-gray-500 dark:text-gray-400">Last readiness check result</span>
                     <button
@@ -1023,27 +921,27 @@ export default function StudyPage() {
             </div>
           ) : (
             /* All done / empty state */
-            <div className="bg-white dark:bg-[#141416] rounded-2xl border border-gray-100 dark:border-white/10 shadow-sm px-6 py-12 text-center">
+            <div className="orm-panel orm-panel-violet rounded-2xl px-6 py-12 text-center">
               <p className="text-gray-600 dark:text-gray-300 font-medium">All topics done or deferred.</p>
               <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Check the graveyard or view your report.</p>
               <div className="flex gap-3 justify-center mt-5">
                 <button
                   onClick={() => router.push(`/report/${sessionId}`)}
-                  className="bg-purple-600 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-purple-700"
+                  className="orm-primary rounded-xl px-4 py-2.5 text-sm font-medium"
                 >
                   View honest report →
                 </button>
                 {deferredCount > 0 && (
                   <button
                     onClick={() => router.push(`/graveyard/${sessionId}`)}
-                    className="border border-gray-200 dark:border-white/15 text-gray-600 dark:text-gray-300 rounded-xl px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-white/5"
+                    className="orm-ghost rounded-xl px-4 py-2.5 text-sm"
                   >
                     Graveyard →
                   </button>
                 )}
                 <button
                   onClick={() => router.push("/dashboard")}
-                  className="border border-gray-200 dark:border-white/15 text-gray-600 dark:text-gray-300 rounded-xl px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-white/5"
+                  className="orm-ghost rounded-xl px-4 py-2.5 text-sm"
                 >
                   ← Dashboard
                 </button>
@@ -1052,20 +950,20 @@ export default function StudyPage() {
           )}
 
           {/* Session progress overview */}
-          <div className="bg-white dark:bg-[#141416] rounded-2xl border border-gray-100 dark:border-white/10 shadow-sm p-5">
+          <div className="orm-panel rounded-2xl p-5">
             <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-3">
               Session progress
             </p>
             <div className="grid grid-cols-3 gap-3">
-              <div className="text-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
+              <div className="text-center p-3 bg-[#10CFA8]/10 rounded-xl">
                 <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{doneCount}</p>
                 <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">Done</p>
               </div>
-              <div className="text-center p-3 bg-gray-50 dark:bg-white/5 rounded-xl">
+              <div className="text-center p-3 bg-zinc-100 dark:bg-white/5 rounded-xl">
                 <p className="text-2xl font-bold text-gray-700 dark:text-gray-300">{pendingCount}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Remaining</p>
               </div>
-              <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded-xl">
+              <div className="text-center p-3 bg-red-500/10 rounded-xl">
                 <p className="text-2xl font-bold text-red-500 dark:text-red-400">{deferredCount}</p>
                 <p className="text-xs text-red-500 dark:text-red-400 mt-0.5">Deferred</p>
               </div>
@@ -1075,9 +973,9 @@ export default function StudyPage() {
                 <span>Overall</span>
                 <span>{topics.length > 0 ? Math.round((doneCount / topics.length) * 100) : 0}%</span>
               </div>
-              <div className="h-2 bg-gray-100 dark:bg-white/10 rounded-full overflow-hidden">
+              <div className="h-2 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                  className="h-full bg-[#10CFA8] rounded-full transition-all duration-500 shadow-[0_0_14px_rgba(16,207,168,0.7)]"
                   style={{ width: topics.length > 0 ? `${(doneCount / topics.length) * 100}%` : "0%" }}
                 />
               </div>
@@ -1103,12 +1001,11 @@ export default function StudyPage() {
       )}
 
       {deferToast && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-xl z-50 shadow-lg">
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-zinc-950 text-white text-sm px-4 py-2.5 rounded-xl z-50 shadow-lg border border-white/10">
           Added to graveyard. We&apos;ll remind you.
         </div>
       )}
 
-      <SocraBotBubble sessionId={sessionId} />
     </div>
   );
 }

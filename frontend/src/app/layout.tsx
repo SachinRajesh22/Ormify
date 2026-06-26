@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { SocraBotGlobal } from "../components/SocraBot.tsx";
 import { ThemeProvider } from "../lib/theme";
 
 const geistSans = Geist({
@@ -43,7 +44,10 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-full flex flex-col bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-50 transition-colors">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          <SocraBotGlobal />
+        </ThemeProvider>
       </body>
     </html>
   );

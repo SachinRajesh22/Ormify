@@ -9,9 +9,9 @@ import { API } from "../../lib/api"
 // ── Color tokens ──────────────────────────────────────────────
 const C_DARK = {
   bg:        "#0D0D0F",
-  card:      "#141416",
-  surface:   "#111113",
-  border:    "rgba(255,255,255,0.06)",
+  card:      "rgba(20,20,22,0.88)",
+  surface:   "rgba(255,255,255,0.05)",
+  border:    "rgba(16,207,168,0.34)",
   text:      "#EEEEF2",
   muted:     "#8A8A9A",
   hint:      "#6B6B80",
@@ -22,10 +22,10 @@ const C_DARK = {
 }
 
 const C_LIGHT = {
-  bg:        "#FAFAFA",
-  card:      "#FFFFFF",
-  surface:   "#F4F4F5",
-  border:    "rgba(0,0,0,0.08)",
+  bg:        "#F8FAFC",
+  card:      "rgba(255,255,255,0.88)",
+  surface:   "rgba(255,255,255,0.78)",
+  border:    "rgba(123,97,255,0.20)",
   text:      "#18181B",
   muted:     "#71717A",
   hint:      "#A1A1AA",
@@ -131,8 +131,23 @@ function Card({ children, style }: { children: React.ReactNode; style?: React.CS
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`,
-      borderRadius: 12, padding: "1.25rem", ...style,
+      borderRadius: 16, padding: "1.25rem",
+      boxShadow: `0 0 0 1px ${C.violet}14, 0 0 24px ${C.teal}22`,
+      backdropFilter: "blur(18px)",
+      position: "relative",
+      overflow: "hidden",
+      ...style,
     }}>
+      <div style={{
+        position: "absolute",
+        top: 0,
+        left: 16,
+        right: 16,
+        height: 1,
+        background: `linear-gradient(90deg, transparent, ${C.teal}, transparent)`,
+        opacity: 0.8,
+        pointerEvents: "none",
+      }} />
       {children}
     </div>
   )
@@ -606,18 +621,19 @@ function DateTimePicker({ value, onChange }: { value: string; onChange: (v: stri
 
 // ── Step 3: Deadline ──────────────────────────────────────────
 function Step3({
-  topics, deadline, setDeadline, feasibility, setFeasibility,
+  topics, deadline, setDeadline, feasibility, setFeasibility, now,
 }: {
   topics:         Topic[]
   deadline:       string
   setDeadline:    (v: string) => void
   feasibility:    Feasibility
   setFeasibility: (v: Feasibility) => void
+  now:            number
 }) {
   const C = useColors()
   const totalHours = topics.reduce((a, t) => a + t.estimatedHours, 0)
   const daysLeft   = deadline
-    ? Math.max(0, Math.ceil((new Date(deadline).getTime() - Date.now()) / 86_400_000))
+    ? Math.max(0, Math.ceil((new Date(deadline).getTime() - now) / 86_400_000))
     : null
 
   const feasibilityConfig: Record<NonNullable<Feasibility>, { label: string; color: string; bg: string; icon: string }> = {
@@ -717,6 +733,7 @@ export default function NewSessionPage() {
   const [feasibility, setFeasibility] = useState<Feasibility>(null)
   const [submitting,  setSubmitting]  = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [now] = useState(() => Date.now())
 
   const canProceed =
     step === 1 ? sessionName.trim().length > 0 :
@@ -793,19 +810,21 @@ export default function NewSessionPage() {
 
   return (
     <ThemeColors.Provider value={C}>
-      <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="orm-bg" style={{ minHeight: "100vh", color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
 
         {/* ── Top bar ── */}
         <header style={{
           borderBottom: `1px solid ${C.border}`, padding: "0 2rem",
           height: 56, display: "flex", alignItems: "center", justifyContent: "space-between",
-          position: "sticky", top: 0, background: C.bg, zIndex: 50,
+          position: "sticky", top: 0, background: theme === "dark" ? "rgba(15,15,15,0.82)" : "rgba(255,255,255,0.78)",
+          zIndex: 50, backdropFilter: "blur(18px)",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{
-              width: 28, height: 28, borderRadius: 8, background: C.violet,
+              width: 32, height: 32, borderRadius: 999, background: C.violet,
               display: "flex", alignItems: "center", justifyContent: "center",
               fontSize: 13, fontWeight: 700, color: "#fff",
+              boxShadow: `0 0 22px ${C.violet}aa`,
             }}>O</div>
             <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: "-0.02em", color: C.text }}>Ormify</span>
           </div>
@@ -813,9 +832,9 @@ export default function NewSessionPage() {
             <button
               onClick={() => router.push("/dashboard")}
               style={{
-                fontSize: 12, color: C.muted, background: "none",
-                border: `1px solid ${C.border}`, borderRadius: 6,
-                padding: "4px 12px", cursor: "pointer",
+                fontSize: 12, color: C.violet, background: C.violet + "12",
+                border: `1px solid ${C.violet}55`, borderRadius: 10,
+                padding: "7px 14px", cursor: "pointer", fontWeight: 600,
               }}
             >
               ← Back to dashboard
@@ -824,10 +843,10 @@ export default function NewSessionPage() {
         </header>
 
         {/* ── Main ── */}
-        <main style={{ maxWidth: 620, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
+        <main style={{ maxWidth: 720, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
 
           <div style={{ marginBottom: "2rem" }}>
-            <h1 style={{ fontSize: 21, fontWeight: 700, margin: "0 0 5px", letterSpacing: "-0.025em", color: C.text }}>
+            <h1 style={{ fontSize: 30, fontWeight: 800, margin: "0 0 6px", letterSpacing: "-0.025em", color: C.text }}>
               New session
             </h1>
             <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>
@@ -855,6 +874,7 @@ export default function NewSessionPage() {
               setDeadline={setDeadline}
               feasibility={feasibility}
               setFeasibility={setFeasibility}
+              now={now}
             />
           )}
 
@@ -866,8 +886,9 @@ export default function NewSessionPage() {
                 style={{
                   flex: 1, padding: "11px", fontSize: 13,
                   cursor: "pointer", borderRadius: 9,
-                  border: `1px solid ${C.border}`,
-                  background: "transparent", color: C.muted,
+                  border: `1px solid ${C.violet}55`,
+                  background: C.violet + "10", color: C.violet,
+                  fontWeight: 600,
                 }}
               >
                 ← Back
@@ -884,6 +905,7 @@ export default function NewSessionPage() {
                 color: "#fff", letterSpacing: "-0.01em",
                 opacity: submitting ? 0.7 : 1,
                 transition: "all 0.15s",
+                boxShadow: canProceed ? `0 0 22px ${C.violet}77` : "none",
               }}
             >
               {submitting ? "Creating session…" : step === 3 ? "Start session →" : "Continue →"}

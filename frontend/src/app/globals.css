@@ -24,3 +24,111 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.orm-bg {
+  background-color: #f8fafc;
+  background-image:
+    linear-gradient(rgba(123, 97, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 207, 168, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at 80% 8%, rgba(123, 97, 255, 0.14), transparent 30%),
+    radial-gradient(circle at 18% 28%, rgba(16, 207, 168, 0.11), transparent 24%);
+  background-size: 96px 96px, 96px 96px, auto, auto;
+}
+
+.dark .orm-bg {
+  background-color: #0d0d0f;
+  background-image:
+    linear-gradient(rgba(123, 97, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 207, 168, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at 80% 8%, rgba(123, 97, 255, 0.18), transparent 30%),
+    radial-gradient(circle at 18% 28%, rgba(16, 207, 168, 0.12), transparent 24%);
+}
+
+.orm-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(16, 207, 168, 0.36);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 0 0 1px rgba(16, 207, 168, 0.08), 0 0 22px rgba(16, 207, 168, 0.14);
+  backdrop-filter: blur(18px);
+}
+
+.dark .orm-panel {
+  background: rgba(20, 20, 22, 0.86);
+}
+
+.orm-panel-violet {
+  border-color: rgba(123, 97, 255, 0.42);
+  box-shadow: 0 0 0 1px rgba(123, 97, 255, 0.12), 0 0 24px rgba(123, 97, 255, 0.24);
+}
+
+.orm-panel-amber {
+  border-color: rgba(245, 158, 11, 0.42);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.12), 0 0 24px rgba(245, 158, 11, 0.20);
+}
+
+.orm-panel-red {
+  border-color: rgba(239, 68, 68, 0.42);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.12), 0 0 24px rgba(239, 68, 68, 0.18);
+}
+
+.orm-panel::before {
+  content: "";
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(16, 207, 168, 0.85), transparent);
+  pointer-events: none;
+}
+
+.orm-panel-violet::before {
+  background: linear-gradient(90deg, transparent, rgba(123, 97, 255, 0.9), transparent);
+}
+
+.orm-panel-amber::before {
+  background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.9), transparent);
+}
+
+.orm-panel-red::before {
+  background: linear-gradient(90deg, transparent, rgba(239, 68, 68, 0.9), transparent);
+}
+
+.orm-primary {
+  background: #7b61ff;
+  color: white;
+  box-shadow: 0 0 22px rgba(123, 97, 255, 0.48);
+}
+
+.orm-primary:hover {
+  opacity: 0.92;
+}
+
+.orm-ghost {
+  border: 1px solid rgba(123, 97, 255, 0.34);
+  background: rgba(123, 97, 255, 0.08);
+  color: #6d50f2;
+}
+
+.dark .orm-ghost {
+  color: #b9adff;
+}
+
+.orm-input {
+  border: 1px solid rgba(123, 97, 255, 0.24);
+  background: rgba(255, 255, 255, 0.78);
+  color: #18181b;
+}
+
+.dark .orm-input {
+  border-color: rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f4f4f5;
+}
+
+.orm-input:focus {
+  border-color: #7b61ff;
+  box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.18);
+  outline: none;
+}
