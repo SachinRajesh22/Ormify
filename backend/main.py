@@ -1155,6 +1155,52 @@ def log_schedule_day(session_id: str, body: ScheduleLogBody):
 
 
 # ── run ──────────────────────────────────────────────────
+YOUTUBE_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+
+
+@app.get("/topics/{topic_id}/videos")
+def get_topic_videos(topic_id: str):
+    topic = supabase.table("topics").select("name, session_id").eq("id", topic_id).single().execute().data
+    if not topic:
+        raise HTTPException(404, "Topic not found")
+
+    if not YOUTUBE_KEY:
+        raise HTTPException(500, "YouTube API key not configured")
+
+    import urllib.request, urllib.parse
+
+    query = urllib.parse.urlencode({
+        "part":       "snippet",
+        "q":          f"{topic['name']} explained tutorial",
+        "type":       "video",
+        "maxResults": 3,
+        "order":      "relevance",
+        "key":        YOUTUBE_KEY,
+    })
+
+    url = f"https://www.googleapis.com/youtube/v3/search?{query}"
+
+    try:
+        with urllib.request.urlopen(url, timeout=8) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        raise HTTPException(502, f"YouTube API error: {e}")
+
+    videos = [
+        {
+            "title":     item["snippet"]["title"],
+            "channel":   item["snippet"]["channelTitle"],
+            "thumbnail": item["snippet"]["thumbnails"]["medium"]["url"],
+            "url":       f"https://youtube.com/watch?v={item['id']['videoId']}",
+            "video_id":  item["id"]["videoId"],
+        }
+        for item in data.get("items", [])
+        if item.get("id", {}).get("videoId")
+    ]
+
+    return {"topic": topic["name"], "videos": videos}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

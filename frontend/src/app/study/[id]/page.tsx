@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 import { useTheme } from "../../../lib/theme";
@@ -44,6 +45,13 @@ interface StudyMaterial {
   explanation: string;
   examples: string[];
   exam_focus: string[];
+}
+
+interface VideoItem {
+  title: string;
+  channel: string;
+  thumbnail: string;
+  url: string;
 }
 
 // MCQ depth check types
@@ -404,6 +412,7 @@ export default function StudyPage() {
   const [depthScores,     setDepthScores]     = useState<Record<string, number>>({});
   const [briefs,          setBriefs]          = useState<Record<string, ChallengeBrief | "loading" | "error">>({});
   const [studyMaterials,  setStudyMaterials]  = useState<Record<string, StudyMaterial | "loading" | "error">>({});
+  const [videos,          setVideos]          = useState<Record<string, VideoItem[]>>({});
   const [materialExpanded, setMaterialExpanded] = useState(true);
   const [loading,  setLoading]  = useState(true);
   const [deferToast, setDeferToast] = useState(false);
@@ -478,6 +487,15 @@ export default function StudyPage() {
       });
     }
   }, [activeTopicId, briefs, studyMaterials]);
+
+  // ── Topic Videos ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!activeTopicId || videos[activeTopicId]) return;
+    fetch(`${API_BASE}/topics/${activeTopicId}/videos`)
+      .then((r) => r.json())
+      .then((data) => setVideos((prev) => ({ ...prev, [activeTopicId]: data.videos ?? [] })))
+      .catch(() => {});
+  }, [activeTopicId, videos]);
 
   // ── Timer ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -750,6 +768,40 @@ export default function StudyPage() {
                   </div>
                 );
               })()}
+
+              {activeTopicId && videos[activeTopicId]?.length > 0 && (
+                <div className="px-6 py-4 border-b border-gray-50 dark:border-white/10">
+                  <p className="text-xs uppercase tracking-widest text-red-500 font-semibold mb-3">
+                    Watch first
+                  </p>
+                  <div className="flex flex-col gap-3">
+                    {videos[activeTopicId].map((v, i) => (
+                      <a
+                        key={i}
+                        href={v.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 rounded-xl border border-gray-100 dark:border-white/10 p-2 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                      >
+                        <Image
+                          src={v.thumbnail}
+                          alt={v.title}
+                          width={96}
+                          height={56}
+                          unoptimized
+                          className="w-24 h-14 rounded-lg object-cover flex-shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white line-clamp-2 leading-snug">
+                            {v.title}
+                          </p>
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{v.channel}</p>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Study Material */}
               {(() => {
