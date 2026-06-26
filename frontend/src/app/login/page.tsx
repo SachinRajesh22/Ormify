@@ -232,6 +232,12 @@ export default function LoginPage() {
   const [error,    setError]    = useState<string | null>(null);
   const [message,  setMessage]  = useState<string | null>(null);
 
+  const switchMode = (nextMode: Mode) => {
+    setMode(nextMode);
+    setError(null);
+    setMessage(null);
+  };
+
   function handleAnimDone() {
     setAnimDone(true);
     // tiny delay so the form mounts before fading in
@@ -258,6 +264,91 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function renderAuthFace(faceMode: Mode) {
+    const isActive = mode === faceMode;
+    const isLogin = faceMode === "login";
+    const emailId = `${faceMode}-email`;
+    const passwordId = `${faceMode}-password`;
+
+    return (
+      <div
+        className="orm-panel orm-panel-violet rounded-2xl p-6"
+        aria-hidden={!isActive}
+        style={{
+          backfaceVisibility: "hidden",
+          transform: isLogin ? undefined : "rotateY(180deg)",
+          position: isLogin ? "relative" : "absolute",
+          inset: isLogin ? undefined : 0,
+          pointerEvents: isActive ? "auto" : "none",
+        }}
+      >
+        {/* mode toggle */}
+        <div className="mb-6 grid grid-cols-2 gap-2 rounded-xl bg-zinc-100 p-1 dark:bg-white/5">
+          {(["login", "signup"] as Mode[]).map(m => (
+            <button
+              key={m}
+              type="button"
+              disabled={!isActive}
+              onClick={() => switchMode(m)}
+              className={`rounded-lg py-2 text-sm font-semibold transition disabled:pointer-events-none ${
+                mode === m
+                  ? "orm-primary"
+                  : "text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
+              }`}
+            >
+              {m === "login" ? "Log in" : "Sign up"}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor={emailId} className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Email
+            </label>
+            <input
+              id={emailId} type="email" required disabled={!isActive}
+              value={email} onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="orm-input w-full rounded-xl px-4 py-3 text-sm placeholder:text-zinc-400 disabled:opacity-100"
+            />
+          </div>
+
+          <div>
+            <label htmlFor={passwordId} className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Password
+            </label>
+            <input
+              id={passwordId} type="password" required minLength={6} disabled={!isActive}
+              value={password} onChange={e => setPassword(e.target.value)}
+              placeholder="At least 6 characters"
+              className="orm-input w-full rounded-xl px-4 py-3 text-sm placeholder:text-zinc-400 disabled:opacity-100"
+            />
+          </div>
+
+          {isActive && error && (
+            <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500" role="alert">
+              {error}
+            </p>
+          )}
+          {isActive && message && (
+            <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-500" role="status">
+              {message}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={!isActive || loading}
+            className="orm-primary w-full rounded-xl py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? "Please wait..." : isLogin ? "Log in" : "Create account"}
+          </button>
+        </form>
+      </div>
+    );
   }
 
   return (
@@ -287,81 +378,33 @@ export default function LoginPage() {
             </p>
           </header>
 
-          <div className="orm-panel orm-panel-violet rounded-2xl p-6">
-            {/* mode toggle */}
-            <div className="mb-6 grid grid-cols-2 gap-2 rounded-xl bg-zinc-100 p-1 dark:bg-white/5">
-              {(["login", "signup"] as Mode[]).map(m => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => { setMode(m); setError(null); setMessage(null); }}
-                  className={`rounded-lg py-2 text-sm font-semibold transition ${
-                    mode === m
-                      ? "orm-primary"
-                      : "text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
-                  }`}
-                >
-                  {m === "login" ? "Log in" : "Sign up"}
-                </button>
-              ))}
+          <div style={{ perspective: "1200px" }}>
+            <div
+              style={{
+                position: "relative",
+                minHeight: "390px",
+                transformStyle: "preserve-3d",
+                transition: "transform 0.55s cubic-bezier(0.45, 0.05, 0.55, 0.95)",
+                transform: mode === "signup" ? "rotateY(180deg)" : "rotateY(0deg)",
+              }}
+            >
+              {renderAuthFace("login")}
+              {renderAuthFace("signup")}
             </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label htmlFor="email" className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Email
-                </label>
-                <input
-                  id="email" type="email" required
-                  value={email} onChange={e => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="orm-input w-full rounded-xl px-4 py-3 text-sm placeholder:text-zinc-400"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="password" className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Password
-                </label>
-                <input
-                  id="password" type="password" required minLength={6}
-                  value={password} onChange={e => setPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  className="orm-input w-full rounded-xl px-4 py-3 text-sm placeholder:text-zinc-400"
-                />
-              </div>
-
-              {error && (
-                <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500" role="alert">
-                  {error}
-                </p>
-              )}
-              {message && (
-                <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-500" role="status">
-                  {message}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="orm-primary w-full rounded-xl py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? "Please wait…" : mode === "login" ? "Log in" : "Create account"}
-              </button>
-            </form>
           </div>
 
           <p className="mt-6 text-center text-xs text-zinc-500 dark:text-zinc-400">
             {mode === "login" ? (
-              <>New here?{" "}
-                <button type="button" onClick={() => setMode("signup")} className="font-semibold text-[#7B61FF] hover:underline">
+              <>
+                New here?{" "}
+                <button type="button" onClick={() => switchMode("signup")} className="font-semibold text-[#7B61FF] hover:underline">
                   Create an account
                 </button>
               </>
             ) : (
-              <>Already have an account?{" "}
-                <button type="button" onClick={() => setMode("login")} className="font-semibold text-[#7B61FF] hover:underline">
+              <>
+                Already have an account?{" "}
+                <button type="button" onClick={() => switchMode("login")} className="font-semibold text-[#7B61FF] hover:underline">
                   Log in
                 </button>
               </>
