@@ -51,6 +51,19 @@ interface StudyMaterial {
   exam_focus: string[];
 }
 
+// MCQ depth check types
+interface MCQQuestion {
+  question: string;
+  options: string[];        // always 3 options
+  correct_index: number;    // 0 | 1 | 2
+  explanation: string;      // shown after answer
+}
+
+interface MCQDepthResult {
+  questions: MCQQuestion[];
+  score: number;            // 0–3
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -105,9 +118,9 @@ function ReadinessScore({ score }: { score: number }) {
 
 function PaceBar({ on_track }: { on_track: "green" | "amber" | "red" }) {
   const map = {
-    green: { label: "On track", color: "text-emerald-600", dot: "bg-emerald-500" },
-    amber: { label: "Slightly behind", color: "text-amber-600", dot: "bg-amber-500" },
-    red: { label: "Behind", color: "text-red-600", dot: "bg-red-500" },
+    green: { label: "On track",       color: "text-emerald-600", dot: "bg-emerald-500" },
+    amber: { label: "Slightly behind", color: "text-amber-600",  dot: "bg-amber-500"  },
+    red:   { label: "Behind",          color: "text-red-600",    dot: "bg-red-500"    },
   };
   const { label, color, dot } = map[on_track];
   return (
@@ -118,156 +131,247 @@ function PaceBar({ on_track }: { on_track: "green" | "amber" | "red" }) {
   );
 }
 
-// ─── Depth Check Modal ───────────────────────────────────────────────────────
+// ─── MCQ Depth Check Modal ───────────────────────────────────────────────────
+// Single API call → get 3 MCQ questions → user picks → instant scored result.
+// No open-text, no multi-round exchange — minimal tokens, fast UX.
 
-interface DepthCheckProps {
+interface MCQDepthCheckProps {
   topicId: string;
   topicName: string;
   onClose: () => void;
   onComplete?: (score: number) => void;
 }
 
-function DepthCheckModal({ topicId, topicName, onClose, onComplete }: DepthCheckProps) {
-  const [phase, setPhase] = useState<"input" | "exchange" | "result">("input");
-  const [explanation, setExplanation] = useState("");
-  const [conversation, setConversation] = useState<ChatMessage[]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState("");
-  const [userResponse, setUserResponse] = useState("");
-  const [level, setLevel] = useState(1);
-  const [score, setScore] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCheckProps) {
+  const [phase, setPhase]             = useState<"loading" | "quiz" | "result">("loading");
+  const [questions, setQuestions]     = useState<MCQQuestion[]>([]);
+  const [current, setCurrent]         = useState(0);
+  const [selected, setSelected]       = useState<number | null>(null);
+  const [revealed, setRevealed]       = useState(false);
+  const [answers, setAnswers]         = useState<number[]>([]);   // chosen index per question
+  const [score, setScore]             = useState<number | null>(null);
+  const [error, setError]             = useState(false);
 
-  async function startCheck() {
-    if (!explanation.trim()) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/topics/${topicId}/depth-check/start`, {
+  // Fetch all 3 MCQ questions in one shot on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/topics/${topicId}/depth-check/mcq`, { method: "POST" })
+      .then(r => r.json())
+      .then((data: MCQDepthResult) => {
+        if (cancelled) return;
+        setQuestions(data.questions);
+        setPhase("quiz");
+      })
+      .catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [topicId]);
+
+  function handleSelect(idx: number) {
+    if (revealed) return;
+    setSelected(idx);
+  }
+
+  function handleReveal() {
+    if (selected === null) return;
+    setRevealed(true);
+  }
+
+  async function handleNext() {
+    if (selected === null) return;
+    const nextAnswers = [...answers, selected];
+    setAnswers(nextAnswers);
+
+    if (current < questions.length - 1) {
+      setCurrent(c => c + 1);
+      setSelected(null);
+      setRevealed(false);
+    } else {
+      // All questions answered — compute score locally, save to backend
+      const correctCount = nextAnswers.filter(
+        (ans, i) => ans === questions[i].correct_index
+      ).length;
+      setScore(correctCount);
+      setPhase("result");
+      // Save score (fire-and-forget, non-blocking)
+      fetch(`${API_BASE}/topics/${topicId}/depth-check/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ student_explanation: explanation }),
-      });
-      const data = await res.json();
-      setCurrentQuestion(data.question);
-      setConversation([{ role: "user", content: explanation }, { role: "assistant", content: data.question }]);
-      setPhase("exchange");
-    } catch {
-      // handle gracefully — keep modal open
-    } finally {
-      setLoading(false);
+        body: JSON.stringify({ score: correctCount, mode: "mcq" }),
+      }).catch(() => {/* silent */});
+      onComplete?.(correctCount);
     }
   }
 
-  async function respond() {
-    if (!userResponse.trim()) return;
-    setLoading(true);
-    const newConversation: ChatMessage[] = [...conversation, { role: "user", content: userResponse }];
-    try {
-      const res = await fetch(`${API_BASE}/topics/${topicId}/depth-check/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_response: userResponse, conversation_history: newConversation, current_level: level }),
-      });
-      const data = await res.json();
-      const nextLevel = level + 1;
-      setLevel(nextLevel);
-      setConversation([...newConversation, { role: "assistant", content: data.question || "" }]);
-      setUserResponse("");
-
-      if (data.resolved || nextLevel > 3) {
-        // save and get score from complete endpoint
-        const completeRes = await fetch(`${API_BASE}/topics/${topicId}/depth-check/complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            level_reached: nextLevel,
-            student_explanation: explanation,
-            conversation_history: [...newConversation, { role: "assistant", content: data.question || "" }],
-          }),
-        });
-        const completeData = await completeRes.json();
-        setScore(completeData.score);
-        setCurrentQuestion("Depth check complete. Review your results below.");
-        setPhase("result");
-        if (completeData.score != null) onComplete?.(completeData.score);
-      } else {
-        setCurrentQuestion(data.question);
-      }
-    } catch {
-      // keep open
-    } finally {
-      setLoading(false);
-    }
-  }
+  const q = questions[current];
+  const isCorrect = revealed && selected !== null && selected === q?.correct_index;
 
   const scoreLabel =
     score === null ? null
-    : score >= 3 ? { cls: "bg-emerald-100 text-emerald-700", label: "Strong", sub: "Resolved at level 1" }
-    : score === 2 ? { cls: "bg-amber-100 text-amber-700", label: "Moderate", sub: "Needed level 2" }
-    : { cls: "bg-red-100 text-red-600", label: "Surface only", sub: "Gap revealed at level 3" };
+    : score === 3 ? { cls: "bg-emerald-100 text-emerald-700", label: "Strong",  sub: "3/3 correct" }
+    : score === 2 ? { cls: "bg-amber-100 text-amber-700",   label: "Moderate", sub: "2/3 correct" }
+    : score === 1 ? { cls: "bg-orange-100 text-orange-700", label: "Shaky",    sub: "1/3 correct" }
+    :               { cls: "bg-red-100 text-red-600",       label: "Weak",     sub: "0/3 correct" };
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-[#1C1C1F] rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-100 dark:border-white/10">
-          <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1">Depth check</p>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            You just finished <span className="text-purple-600 dark:text-purple-400">{topicName}</span>. How well did you actually get it?
-          </h2>
+
+        {/* Header — always has a close button */}
+        <div className="px-6 py-5 border-b border-gray-100 dark:border-white/10 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1">
+              Depth check · {topicName}
+            </p>
+            {phase === "quiz" && (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Question {current + 1} of {questions.length}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl leading-none transition-colors"
+            aria-label="Close"
+          >
+            ×
+          </button>
         </div>
 
         <div className="px-6 py-5 space-y-4">
-          {phase === "input" && (
-            <>
-              <p className="text-sm text-gray-600 dark:text-gray-300">Explain it in your own words. Don't look at your notes.</p>
-              <textarea
-                className="w-full border border-gray-200 dark:border-white/15 bg-white dark:bg-white/5 text-gray-900 dark:text-white rounded-xl p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 h-32 placeholder:text-gray-400 dark:placeholder:text-gray-600"
-                placeholder="Write your explanation here..."
-                value={explanation}
-                onChange={(e) => setExplanation(e.target.value)}
-              />
-              <button
-                onClick={startCheck}
-                disabled={loading || !explanation.trim()}
-                className="w-full bg-purple-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
-              >
-                {loading ? "Thinking..." : "Submit →"}
-              </button>
-            </>
+
+          {/* Loading */}
+          {phase === "loading" && !error && (
+            <div className="space-y-3 py-4">
+              <div className="h-4 bg-gray-100 dark:bg-white/10 rounded animate-pulse w-3/4" />
+              <div className="h-4 bg-gray-100 dark:bg-white/10 rounded animate-pulse w-full" />
+              <div className="h-4 bg-gray-100 dark:bg-white/10 rounded animate-pulse w-2/3" />
+              <p className="text-xs text-gray-400 dark:text-gray-500 pt-2 text-center">Generating questions…</p>
+            </div>
           )}
 
-          {phase === "exchange" && (
+          {/* Error */}
+          {error && (
+            <div className="py-4 text-center space-y-3">
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                Could not load questions. Check your backend connection.
+              </p>
+              <button
+                onClick={onClose}
+                className="text-sm text-purple-600 dark:text-purple-400 hover:underline"
+              >
+                Close
+              </button>
+            </div>
+          )}
+
+          {/* Quiz */}
+          {phase === "quiz" && q && (
             <>
-              <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-4 text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                <span className="text-xs text-purple-500 dark:text-purple-400 font-medium block mb-1">Level {level}</span>
-                {currentQuestion}
+              {/* Progress bar */}
+              <div className="h-1 bg-gray-100 dark:bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-purple-500 rounded-full transition-all duration-300"
+                  style={{ width: `${((current) / questions.length) * 100}%` }}
+                />
               </div>
-              <textarea
-                className="w-full border border-gray-200 dark:border-white/15 bg-white dark:bg-white/5 text-gray-900 dark:text-white rounded-xl p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 h-24 placeholder:text-gray-400 dark:placeholder:text-gray-600"
-                placeholder="Your answer..."
-                value={userResponse}
-                onChange={(e) => setUserResponse(e.target.value)}
-              />
-              <button
-                onClick={respond}
-                disabled={loading || !userResponse.trim()}
-                className="w-full bg-purple-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
-              >
-                {loading ? "Thinking..." : "Respond →"}
-              </button>
+
+              {/* Question */}
+              <p className="text-sm font-medium text-gray-900 dark:text-white leading-relaxed">
+                {q.question}
+              </p>
+
+              {/* Options */}
+              <div className="space-y-2">
+                {q.options.map((opt, i) => {
+                  const isSelected  = selected === i;
+                  const isRight     = i === q.correct_index;
+                  let cls = "border border-gray-200 dark:border-white/15 text-gray-800 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/5";
+                  if (revealed) {
+                    if (isRight)           cls = "border border-emerald-300 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-200";
+                    else if (isSelected)   cls = "border border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300";
+                    else                   cls = "border border-gray-100 dark:border-white/10 text-gray-400 dark:text-gray-600";
+                  } else if (isSelected) {
+                    cls = "border-2 border-purple-500 bg-purple-50 dark:bg-purple-900/20 text-purple-900 dark:text-purple-100";
+                  }
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => handleSelect(i)}
+                      disabled={revealed}
+                      className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-all ${cls}`}
+                    >
+                      <span className="font-mono text-[11px] mr-2 opacity-50">
+                        {String.fromCharCode(65 + i)}.
+                      </span>
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Explanation (shown after reveal) */}
+              {revealed && (
+                <div className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
+                  isCorrect
+                    ? "bg-emerald-50 dark:bg-emerald-900/15 text-emerald-800 dark:text-emerald-200"
+                    : "bg-red-50 dark:bg-red-900/15 text-red-800 dark:text-red-200"
+                }`}>
+                  <span className="font-semibold">{isCorrect ? "Correct! " : "Not quite. "}</span>
+                  {q.explanation}
+                </div>
+              )}
+
+              {/* Action buttons */}
+              {!revealed ? (
+                <button
+                  onClick={handleReveal}
+                  disabled={selected === null}
+                  className="w-full bg-purple-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-purple-700 disabled:opacity-40 transition-colors"
+                >
+                  Check answer
+                </button>
+              ) : (
+                <button
+                  onClick={handleNext}
+                  className="w-full bg-purple-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-purple-700 transition-colors"
+                >
+                  {current < questions.length - 1 ? "Next question →" : "See results →"}
+                </button>
+              )}
             </>
           )}
 
-          {phase === "result" && scoreLabel && (
+          {/* Result */}
+          {phase === "result" && scoreLabel && score !== null && (
             <div className="space-y-4">
-              <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-4 text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                {currentQuestion}
-              </div>
-              <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl">
+              {/* Score badge */}
+              <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-white/5 rounded-xl">
                 <span className={`text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${scoreLabel.cls}`}>
                   {scoreLabel.label}
                 </span>
-                <p className="text-xs text-gray-500">{scoreLabel.sub}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">{scoreLabel.sub}</p>
               </div>
+
+              {/* Per-question recap */}
+              <div className="space-y-2">
+                {questions.map((qn, i) => {
+                  const wasCorrect = answers[i] === qn.correct_index;
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-3 px-3 py-2.5 rounded-lg text-sm ${
+                        wasCorrect
+                          ? "bg-emerald-50 dark:bg-emerald-900/10 text-emerald-800 dark:text-emerald-200"
+                          : "bg-red-50 dark:bg-red-900/10 text-red-800 dark:text-red-200"
+                      }`}
+                    >
+                      <span className="flex-shrink-0 font-bold">{wasCorrect ? "✓" : "✗"}</span>
+                      <p className="leading-snug">{qn.question}</p>
+                    </div>
+                  );
+                })}
+              </div>
+
               <button
                 onClick={onClose}
                 className="w-full bg-purple-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-purple-700 transition-colors"
@@ -276,6 +380,7 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: DepthCheck
               </button>
             </div>
           )}
+
         </div>
       </div>
     </div>
@@ -285,11 +390,11 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: DepthCheck
 // ─── SocraBot Bubble ─────────────────────────────────────────────────────────
 
 function SocraBotBubble({ sessionId }: { sessionId: string }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen]       = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: "Hey! Ask me anything — your pace, a concept, what to study next." },
   ]);
-  const [input, setInput] = useState("");
+  const [input, setInput]     = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -322,10 +427,15 @@ function SocraBotBubble({ sessionId }: { sessionId: string }) {
   return (
     <>
       {open && (
-        <div className="fixed bottom-20 right-4 w-80 bg-white dark:bg-[#1C1C1F] rounded-2xl shadow-2xl border border-gray-100 dark:border-white/10 z-40 flex flex-col overflow-hidden" style={{ height: "420px" }}>
+        <div
+          className="fixed bottom-20 right-4 w-80 bg-white dark:bg-[#1C1C1F] rounded-2xl shadow-2xl border border-gray-100 dark:border-white/10 z-40 flex flex-col overflow-hidden"
+          style={{ height: "420px" }}
+        >
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-white/10 bg-purple-600">
             <span className="text-white font-semibold text-sm">SocraBot</span>
-            <button onClick={() => setOpen(false)} className="text-purple-200 hover:text-white text-lg leading-none">×</button>
+            <button onClick={() => setOpen(false)} className="text-purple-200 hover:text-white text-lg leading-none">
+              ×
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {messages.map((m, i) => (
@@ -379,74 +489,42 @@ function SocraBotBubble({ sessionId }: { sessionId: string }) {
   );
 }
 
-// ─── Mark Done Modal ──────────────────────────────────────────────────────────
-
-interface MarkDoneModalProps {
-  timerSeconds: number;
-  onConfirm: (minutes: number) => void;
-  onCancel: () => void;
-}
-
-function MarkDoneModal({ timerSeconds, onConfirm, onCancel }: MarkDoneModalProps) {
-  const [minutes, setMinutes] = useState(Math.round(timerSeconds / 60));
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-[#1C1C1F] rounded-2xl w-full max-w-sm shadow-xl p-6 space-y-4">
-        <h3 className="font-semibold text-gray-900 dark:text-white">How long did this actually take?</h3>
-        <div className="flex items-center gap-3">
-          <input
-            type="number"
-            min={1}
-            value={minutes}
-            onChange={(e) => setMinutes(Number(e.target.value))}
-            className="w-24 border border-gray-200 dark:border-white/15 bg-white dark:bg-white/5 text-gray-900 dark:text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
-          <span className="text-sm text-gray-500 dark:text-gray-400">minutes</span>
-        </div>
-        <p className="text-xs text-gray-400 dark:text-gray-500">Timer was at {formatTimer(timerSeconds)}</p>
-        <div className="flex gap-2 pt-1">
-          <button onClick={onCancel} className="flex-1 border border-gray-200 dark:border-white/15 rounded-xl py-2.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5">
-            Cancel
-          </button>
-          <button
-            onClick={() => onConfirm(minutes)}
-            className="flex-1 bg-emerald-600 text-white rounded-xl py-2.5 text-sm font-medium hover:bg-emerald-700"
-          >
-            Confirm done
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function StudyPage() {
-  const params = useParams();
-  const router = useRouter();
+  const params    = useParams();
+  const router    = useRouter();
   const sessionId = params?.id as string;
   const { theme } = useTheme();
-const isDark = theme === "dark";
+  // isDark retained here for potential future use; suppressed lint with comment
+  const _isDark = theme === "dark"; void _isDark;
 
-const [email, setEmail] = useState<string | null>(null);
-
+  const [email,   setEmail]   = useState<string | null>(null);
   const [session, setSession] = useState<SessionData | null>(null);
-  const [topics, setTopics] = useState<Topic[]>([]);
-  const [pace, setPace] = useState<PaceData | null>(null);
-  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
-  const [timerSeconds, setTimerSeconds] = useState(0);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [showMarkDone, setShowMarkDone] = useState(false);
+  const [topics,  setTopics]  = useState<Topic[]>([]);
+  const [pace,    setPace]    = useState<PaceData | null>(null);
+
+  const [activeTopicId,   setActiveTopicId]   = useState<string | null>(null);
+  const [timerSeconds,    setTimerSeconds]    = useState(0);
+  const [timerRunning,    setTimerRunning]    = useState(false);
   const [depthCheckTopic, setDepthCheckTopic] = useState<Topic | null>(null);
-  const [depthScores, setDepthScores] = useState<Record<string, number>>({});
-  const [briefs, setBriefs] = useState<Record<string, ChallengeBrief | "loading" | "error">>({});
-  const [studyMaterials, setStudyMaterials] = useState<Record<string, StudyMaterial | "loading" | "error">>({});
+  const [depthScores,     setDepthScores]     = useState<Record<string, number>>({});
+  const [briefs,          setBriefs]          = useState<Record<string, ChallengeBrief | "loading" | "error">>({});
+  const [studyMaterials,  setStudyMaterials]  = useState<Record<string, StudyMaterial | "loading" | "error">>({});
   const [materialExpanded, setMaterialExpanded] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [loading,  setLoading]  = useState(true);
   const [deferToast, setDeferToast] = useState(false);
+  const [markDoneLoading, setMarkDoneLoading] = useState(false);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setEmail(data.user.email ?? null);
+      else router.push("/login");
+    });
+  }, [router]);
 
   // ── Fetch session + topics + pace ────────────────────────────────────────
   const fetchAll = useCallback(async () => {
@@ -457,41 +535,32 @@ const [email, setEmail] = useState<string | null>(null);
         fetch(`${API_BASE}/sessions/${sessionId}/pace`),
         fetch(`${API_BASE}/sessions/${sessionId}/depth-scores`),
       ]);
-      const sessData: SessionData = await sessRes.json();
-      const topicsData: Topic[] = await topicsRes.json();
-      const paceData: PaceData = await paceRes.json();
+      const sessData: SessionData     = await sessRes.json();
+      const topicsData: Topic[]       = await topicsRes.json();
+      const paceData: PaceData        = await paceRes.json();
       const scoresData: Record<string, number> = scoresRes.ok ? await scoresRes.json() : {};
-      setDepthScores((prev) => ({ ...prev, ...scoresData }));
 
+      setDepthScores((prev) => ({ ...prev, ...scoresData }));
       setSession(sessData);
       const sorted = [...topicsData].sort((a, b) => a.priority_order - b.priority_order);
       setTopics(sorted);
       setPace(paceData);
 
-      // auto-set active topic = first pending/in_progress
-      if (!activeTopicId) {
+      setActiveTopicId((prev) => {
+        if (prev) return prev;
         const first = sorted.find((t) => t.status === "pending" || t.status === "in_progress");
-        if (first) setActiveTopicId(first.id);
-      }
+        return first?.id ?? null;
+      });
     } catch {
-      // backend not reachable yet — silent
+      // backend not reachable — silent
     } finally {
       setLoading(false);
     }
-  }, [sessionId, activeTopicId]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (sessionId) fetchAll();
-  }, [sessionId]);
-  useEffect(() => {
-  supabase.auth.getUser().then(({ data }) => {
-    if (data.user) {
-      setEmail(data.user.email ?? null);
-    } else {
-      router.push("/login");
-    }
-  });
-}, [router]);
+  }, [sessionId, fetchAll]);
 
   // ── Challenge Brief + Study Material ─────────────────────────────────────
   useEffect(() => {
@@ -510,7 +579,7 @@ const [email, setEmail] = useState<string | null>(null);
         .then((data) => setStudyMaterials((prev) => ({ ...prev, [activeTopicId]: data })))
         .catch(() => setStudyMaterials((prev) => ({ ...prev, [activeTopicId]: "error" })));
     }
-  }, [activeTopicId]);
+  }, [activeTopicId, briefs, studyMaterials]);
 
   // ── Timer ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -528,11 +597,15 @@ const [email, setEmail] = useState<string | null>(null);
     setTimerRunning(false);
   }
 
-  // ── Mark Done ─────────────────────────────────────────────────────────────
-  async function confirmDone(minutes: number) {
-    if (!activeTopicId) return;
-    setShowMarkDone(false);
+  // ── Mark Done — auto-uses timer, no modal needed ──────────────────────────
+  async function markDone() {
+    if (!activeTopicId || markDoneLoading) return;
     setTimerRunning(false);
+    setMarkDoneLoading(true);
+
+    // Use timer seconds directly; convert to minutes (minimum 1)
+    const minutes = Math.max(1, Math.round(timerSeconds / 60));
+
     try {
       await fetch(`${API_BASE}/topics/${activeTopicId}/complete`, {
         method: "PATCH",
@@ -540,13 +613,14 @@ const [email, setEmail] = useState<string | null>(null);
         body: JSON.stringify({ actual_minutes: minutes }),
       });
       const doneTopic = topics.find((t) => t.id === activeTopicId);
-      // refresh topics
       await fetchAll();
       setTimerSeconds(0);
-      // trigger depth check
       if (doneTopic) setDepthCheckTopic(doneTopic);
     } catch {
-      // backend call failed, still update local
+      // backend failed — still reset timer locally
+      setTimerSeconds(0);
+    } finally {
+      setMarkDoneLoading(false);
     }
   }
 
@@ -560,18 +634,19 @@ const [email, setEmail] = useState<string | null>(null);
       setDeferToast(true);
       setTimeout(() => setDeferToast(false), 3000);
       await fetchAll();
-      // advance to next pending
-      const next = topics.find((t) => t.id !== activeTopicId && (t.status === "pending" || t.status === "in_progress"));
+      const next = topics.find(
+        (t) => t.id !== activeTopicId && (t.status === "pending" || t.status === "in_progress")
+      );
       if (next) setActiveTopicId(next.id);
     } catch {
       // silent
     }
   }
 
-  const activeTopic = topics.find((t) => t.id === activeTopicId) || null;
-  const pendingCount = topics.filter((t) => t.status === "pending" || t.status === "in_progress").length;
-  const doneCount = topics.filter((t) => t.status === "done").length;
-  const deferredCount = topics.filter((t) => t.status === "deferred").length;
+  const activeTopic    = topics.find((t) => t.id === activeTopicId) || null;
+  const pendingCount   = topics.filter((t) => t.status === "pending" || t.status === "in_progress").length;
+  const doneCount      = topics.filter((t) => t.status === "done").length;
+  const deferredCount  = topics.filter((t) => t.status === "deferred").length;
 
   if (loading) {
     return (
@@ -583,6 +658,7 @@ const [email, setEmail] = useState<string | null>(null);
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-[#0D0D0F] text-gray-900 dark:text-white">
+
       {/* ── Top nav ─────────────────────────────────────────────────────────── */}
       <header className="h-14 bg-white dark:bg-[#141416] border-b border-gray-100 dark:border-white/10 flex items-center justify-between px-4 flex-shrink-0 z-10">
         <div className="flex items-center gap-3">
@@ -615,6 +691,7 @@ const [email, setEmail] = useState<string | null>(null);
       </header>
 
       <div className="flex flex-1 overflow-hidden">
+
         {/* ── Left sidebar ─────────────────────────────────────────────────── */}
         <aside className="w-64 bg-white dark:bg-[#141416] border-r border-gray-100 dark:border-white/10 flex flex-col flex-shrink-0 overflow-hidden">
           {/* Pace health strip */}
@@ -626,7 +703,7 @@ const [email, setEmail] = useState<string | null>(null);
             )}
             <div className="mt-2 flex gap-3 text-xs text-gray-500 dark:text-gray-400">
               <span>{doneCount} done</span>
-              <span>{deferredCount > 0 ? `${deferredCount} deferred` : ""}</span>
+              {deferredCount > 0 && <span>{deferredCount} deferred</span>}
               <span>{pendingCount} left</span>
             </div>
           </div>
@@ -686,7 +763,7 @@ const [email, setEmail] = useState<string | null>(null);
                 onClick={() => router.push(`/graveyard/${sessionId}`)}
                 className="w-full flex items-center gap-2 text-xs text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 font-medium"
               >
-                <span>{deferredCount} deferred</span>
+                <span>{deferredCount} deferred — view graveyard →</span>
               </button>
             </div>
           )}
@@ -694,6 +771,7 @@ const [email, setEmail] = useState<string | null>(null);
 
         {/* ── Main area ────────────────────────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto p-6 space-y-4">
+
           {/* Pace projection banner */}
           {pace && (
             <div
@@ -715,7 +793,9 @@ const [email, setEmail] = useState<string | null>(null);
               <div className="px-6 py-4 border-b border-gray-50 dark:border-white/10">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1">Active topic</p>
+                    <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1">
+                      Active topic
+                    </p>
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{activeTopic.name}</h2>
                   </div>
                   <span className="text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-white/5 px-2.5 py-1 rounded-full">
@@ -739,14 +819,20 @@ const [email, setEmail] = useState<string | null>(null);
                 );
                 return (
                   <div className="px-6 py-4 border-b border-gray-50 dark:border-white/10 bg-purple-50/40 dark:bg-purple-900/10">
-                    <p className="text-xs uppercase tracking-widest text-purple-500 dark:text-purple-400 font-semibold mb-3">Challenge brief</p>
+                    <p className="text-xs uppercase tracking-widest text-purple-500 dark:text-purple-400 font-semibold mb-3">
+                      Challenge brief
+                    </p>
                     <div className="space-y-3">
                       <div>
-                        <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1">What this solves</p>
+                        <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1">
+                          What this solves
+                        </p>
                         <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{brief.what_it_solves}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1.5">You must be able to explain</p>
+                        <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-1.5">
+                          You must be able to explain
+                        </p>
                         <ul className="space-y-1">
                           {brief.must_explain.map((item, i) => (
                             <li key={i} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -757,7 +843,9 @@ const [email, setEmail] = useState<string | null>(null);
                         </ul>
                       </div>
                       <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/30 rounded-lg px-3 py-2">
-                        <p className="text-[10px] uppercase tracking-widest text-amber-500 dark:text-amber-400 font-semibold mb-0.5">Watch out</p>
+                        <p className="text-[10px] uppercase tracking-widest text-amber-500 dark:text-amber-400 font-semibold mb-0.5">
+                          Watch out
+                        </p>
                         <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">{brief.watch_out}</p>
                       </div>
                     </div>
@@ -772,13 +860,16 @@ const [email, setEmail] = useState<string | null>(null);
                 const isLoading = mat === "loading";
                 return (
                   <div className="border-b border-gray-50 dark:border-white/10">
-                    {/* header row */}
                     <button
                       onClick={() => setMaterialExpanded((e) => !e)}
                       className="w-full px-6 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
                     >
-                      <span className="text-xs uppercase tracking-widest text-indigo-500 dark:text-indigo-400 font-semibold">Study material</span>
-                      <span className="text-gray-400 dark:text-gray-500 text-sm font-medium">{materialExpanded ? "−" : "+"}</span>
+                      <span className="text-xs uppercase tracking-widest text-indigo-500 dark:text-indigo-400 font-semibold">
+                        Study material
+                      </span>
+                      <span className="text-gray-400 dark:text-gray-500 text-sm font-medium">
+                        {materialExpanded ? "−" : "+"}
+                      </span>
                     </button>
 
                     {materialExpanded && (
@@ -786,18 +877,21 @@ const [email, setEmail] = useState<string | null>(null);
                         {isLoading ? (
                           <div className="space-y-2 pt-1">
                             {[0.9, 0.7, 0.85, 0.6].map((w, i) => (
-                              <div key={i} className="h-3 bg-gray-100 dark:bg-white/10 rounded animate-pulse" style={{ width: `${w * 100}%` }} />
+                              <div
+                                key={i}
+                                className="h-3 bg-gray-100 dark:bg-white/10 rounded animate-pulse"
+                                style={{ width: `${w * 100}%` }}
+                              />
                             ))}
                           </div>
                         ) : (
                           <>
-                            {/* Overview */}
                             <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed pt-1">{mat.overview}</p>
-
-                            {/* Key points */}
                             {mat.key_points.length > 0 && (
                               <div>
-                                <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-semibold mb-2">Key points</p>
+                                <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-semibold mb-2">
+                                  Key points
+                                </p>
                                 <ul className="space-y-1.5">
                                   {mat.key_points.map((pt, i) => (
                                     <li key={i} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -808,19 +902,21 @@ const [email, setEmail] = useState<string | null>(null);
                                 </ul>
                               </div>
                             )}
-
-                            {/* Explanation */}
                             {mat.explanation && (
                               <div>
-                                <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-semibold mb-2">Explanation</p>
-                                <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-line">{mat.explanation}</p>
+                                <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-semibold mb-2">
+                                  Explanation
+                                </p>
+                                <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-line">
+                                  {mat.explanation}
+                                </p>
                               </div>
                             )}
-
-                            {/* Examples */}
                             {mat.examples.length > 0 && (
                               <div className="bg-indigo-50 dark:bg-indigo-900/15 rounded-xl p-4">
-                                <p className="text-[10px] uppercase tracking-widest text-indigo-500 dark:text-indigo-400 font-semibold mb-2">Real-world examples</p>
+                                <p className="text-[10px] uppercase tracking-widest text-indigo-500 dark:text-indigo-400 font-semibold mb-2">
+                                  Real-world examples
+                                </p>
                                 <ul className="space-y-1.5">
                                   {mat.examples.map((ex, i) => (
                                     <li key={i} className="flex items-start gap-2 text-sm text-indigo-900 dark:text-indigo-200">
@@ -831,11 +927,11 @@ const [email, setEmail] = useState<string | null>(null);
                                 </ul>
                               </div>
                             )}
-
-                            {/* Exam focus */}
                             {mat.exam_focus.length > 0 && (
                               <div className="bg-emerald-50 dark:bg-emerald-900/15 rounded-xl p-4">
-                                <p className="text-[10px] uppercase tracking-widest text-emerald-600 dark:text-emerald-400 font-semibold mb-2">Exam focus</p>
+                                <p className="text-[10px] uppercase tracking-widest text-emerald-600 dark:text-emerald-400 font-semibold mb-2">
+                                  Exam focus
+                                </p>
                                 <ul className="space-y-1.5">
                                   {mat.exam_focus.map((ef, i) => (
                                     <li key={i} className="flex items-start gap-2 text-sm text-emerald-900 dark:text-emerald-200">
@@ -889,10 +985,11 @@ const [email, setEmail] = useState<string | null>(null);
               {/* Action buttons */}
               <div className="px-6 py-4 flex gap-3">
                 <button
-                  onClick={() => setShowMarkDone(true)}
-                  className="flex-1 bg-emerald-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-emerald-700 transition-colors"
+                  onClick={markDone}
+                  disabled={markDoneLoading}
+                  className="flex-1 bg-emerald-600 text-white rounded-xl py-3 text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-60"
                 >
-                  Mark done
+                  {markDoneLoading ? "Saving…" : "Mark done"}
                 </button>
                 <button
                   onClick={deferTopic}
@@ -907,7 +1004,8 @@ const [email, setEmail] = useState<string | null>(null);
                   Check readiness
                 </button>
               </div>
-              {/* Readiness score if already checked */}
+
+              {/* Readiness score row */}
               {activeTopic && depthScores[activeTopic.id] != null && (
                 <div className="px-6 pb-4">
                   <div className="rounded-xl bg-gray-50 dark:bg-white/5 px-4 py-2.5 flex items-center gap-3">
@@ -924,6 +1022,7 @@ const [email, setEmail] = useState<string | null>(null);
               )}
             </div>
           ) : (
+            /* All done / empty state */
             <div className="bg-white dark:bg-[#141416] rounded-2xl border border-gray-100 dark:border-white/10 shadow-sm px-6 py-12 text-center">
               <p className="text-gray-600 dark:text-gray-300 font-medium">All topics done or deferred.</p>
               <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Check the graveyard or view your report.</p>
@@ -937,18 +1036,26 @@ const [email, setEmail] = useState<string | null>(null);
                 {deferredCount > 0 && (
                   <button
                     onClick={() => router.push(`/graveyard/${sessionId}`)}
-                    className="border border-gray-200 text-gray-600 rounded-xl px-4 py-2.5 text-sm hover:bg-gray-50"
+                    className="border border-gray-200 dark:border-white/15 text-gray-600 dark:text-gray-300 rounded-xl px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-white/5"
                   >
-                    Graveyard
+                    Graveyard →
                   </button>
                 )}
+                <button
+                  onClick={() => router.push("/dashboard")}
+                  className="border border-gray-200 dark:border-white/15 text-gray-600 dark:text-gray-300 rounded-xl px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-white/5"
+                >
+                  ← Dashboard
+                </button>
               </div>
             </div>
           )}
 
           {/* Session progress overview */}
           <div className="bg-white dark:bg-[#141416] rounded-2xl border border-gray-100 dark:border-white/10 shadow-sm p-5">
-            <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-3">Session progress</p>
+            <p className="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500 font-medium mb-3">
+              Session progress
+            </p>
             <div className="grid grid-cols-3 gap-3">
               <div className="text-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
                 <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{doneCount}</p>
@@ -963,8 +1070,6 @@ const [email, setEmail] = useState<string | null>(null);
                 <p className="text-xs text-red-500 dark:text-red-400 mt-0.5">Deferred</p>
               </div>
             </div>
-
-            {/* Progress bar */}
             <div className="mt-4">
               <div className="flex justify-between text-xs text-gray-400 dark:text-gray-500 mb-1.5">
                 <span>Overall</span>
@@ -983,14 +1088,6 @@ const [email, setEmail] = useState<string | null>(null);
 
       {/* ── Modals & overlays ────────────────────────────────────────────────── */}
 
-      {showMarkDone && (
-        <MarkDoneModal
-          timerSeconds={timerSeconds}
-          onConfirm={confirmDone}
-          onCancel={() => setShowMarkDone(false)}
-        />
-      )}
-
       {depthCheckTopic && (
         <DepthCheckModal
           topicId={depthCheckTopic.id}
@@ -1007,7 +1104,7 @@ const [email, setEmail] = useState<string | null>(null);
 
       {deferToast && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-xl z-50 shadow-lg">
-          Added to graveyard. We'll remind you.
+          Added to graveyard. We&apos;ll remind you.
         </div>
       )}
 

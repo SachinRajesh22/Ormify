@@ -542,6 +542,42 @@ class DepthCheckComplete(BaseModel):
     conversation_history: list
 
 
+class DepthCheckSave(BaseModel):
+    score: int
+    mode: str
+
+
+def _normalize_mcq_questions(raw: object) -> list[dict]:
+    data = raw if isinstance(raw, dict) else {}
+    questions = data.get("questions", []) if isinstance(data, dict) else []
+    if not isinstance(questions, list):
+        questions = []
+
+    normalized = []
+    for q in questions[:3]:
+        if not isinstance(q, dict):
+            continue
+        options = q.get("options", [])
+        if not isinstance(options, list):
+            options = []
+        options = [str(o) for o in options[:3]]
+        if len(options) != 3:
+            continue
+
+        correct_index = q.get("correct_index", 0)
+        if not isinstance(correct_index, int) or correct_index < 0 or correct_index > 2:
+            correct_index = 0
+
+        normalized.append({
+            "question": str(q.get("question", "")).strip(),
+            "options": options,
+            "correct_index": correct_index,
+            "explanation": str(q.get("explanation", "")).strip(),
+        })
+
+    return normalized
+
+
 @app.get("/sessions/{session_id}/depth-scores")
 def get_depth_scores(session_id: str):
     """Returns latest depth score per topic for this session."""
@@ -555,6 +591,50 @@ def get_depth_scores(session_id: str):
         if c["topic_id"] not in latest:
             latest[c["topic_id"]] = c["score"]
     return latest
+
+
+@app.post("/topics/{topic_id}/depth-check/mcq")
+def depth_check_mcq(topic_id: str):
+    topic = supabase.table("topics").select("*").eq("id", topic_id).single().execute().data
+    if not topic:
+        raise HTTPException(404, "Topic not found")
+
+    prompt = f"""Generate 3 MCQ questions testing "{topic['name']}".
+Return ONLY JSON: {{"questions":[{{"question":"...","options":["A","B","C"],"correct_index":0,"explanation":"..."}}]}}
+No preamble. 3 options each. Concise."""
+
+    try:
+        questions = _normalize_mcq_questions(json.loads(_generate_json(prompt)))
+    except Exception as e:
+        raise HTTPException(500, f"MCQ generation failed: {e}")
+
+    if len(questions) != 3:
+        raise HTTPException(500, "MCQ generation returned invalid question data")
+
+    return {"questions": questions, "score": 0}
+
+
+@app.post("/topics/{topic_id}/depth-check/save")
+def depth_check_save(topic_id: str, body: DepthCheckSave):
+    topic = supabase.table("topics").select("session_id").eq("id", topic_id).single().execute().data
+    if not topic:
+        raise HTTPException(404, "Topic not found")
+    if body.mode != "mcq":
+        raise HTTPException(400, "Unsupported depth-check mode")
+
+    row = {
+        "id": str(uuid.uuid4()),
+        "topic_id": topic_id,
+        "session_id": topic["session_id"],
+        "level_reached": 0,
+        "score": body.score,
+        "student_explanation": "",
+        "conversation_history": [],
+        "mode": body.mode,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    supabase.table("depth_checks").insert(row).execute()
+    return {"score": body.score, "mode": body.mode, "message": "Depth check saved"}
 
 
 @app.post("/topics/{topic_id}/depth-check/start")
