@@ -769,4 +769,8 @@ export default function DashboardPage() {
       </main>
     </div>
   )
+<<<<<<< Updated upstream
 }
+=======
+}
+>>>>>>> Stashed changes
