@@ -900,6 +900,259 @@ def analytics_deferred(user_id: str):
 def get_status(session_id: str):
     return get_session_context(session_id)
 
+# ══════════════════════════════════════════════════════════
+# TASK 8 — Dashboard stat APIs
+# ══════════════════════════════════════════════════════════
+
+@app.get("/users/{user_id}/sessions/summary")
+def sessions_summary(user_id: str):
+    """
+    Total sessions + active session count for the dashboard header cards.
+    A session is 'active' when it has at least one topic that is pending or in_progress.
+    """
+    sessions = supabase.table("sessions") \
+        .select("id") \
+        .eq("user_id", user_id) \
+        .execute().data
+
+    if not sessions:
+        return {"total_sessions": 0, "active_sessions": 0}
+
+    session_ids = [s["id"] for s in sessions]
+
+    # Any topic that is not done/deferred means the session is still active
+    active_topics = supabase.table("topics") \
+        .select("session_id") \
+        .in_("session_id", session_ids) \
+        .in_("status", ["pending", "in_progress"]) \
+        .execute().data
+
+    active_session_ids = {t["session_id"] for t in active_topics}
+
+    return {
+        "total_sessions":  len(sessions),
+        "active_sessions": len(active_session_ids),
+    }
+
+
+@app.get("/users/{user_id}/topics/weekly")
+def topics_this_week(user_id: str):
+    """
+    Count of topics completed in the current calendar week (Mon–Sun, UTC).
+    Uses pace_logs.completed_at because topics table has no completed_at column.
+    """
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    # Monday 00:00 UTC of the current week
+    week_start = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    # Get all session IDs for this user first
+    sessions = supabase.table("sessions") \
+        .select("id") \
+        .eq("user_id", user_id) \
+        .execute().data
+
+    if not sessions:
+        return {"count": 0, "week_start": week_start.isoformat()}
+
+    session_ids = [s["id"] for s in sessions]
+
+    # Count pace_log rows (each row = one topic completion) within this week
+    logs = supabase.table("pace_logs") \
+        .select("id") \
+        .in_("session_id", session_ids) \
+        .gte("completed_at", week_start.isoformat()) \
+        .execute().data
+
+    return {
+        "count":      len(logs),
+        "week_start": week_start.isoformat(),
+    }
+
+
+# ══════════════════════════════════════════════════════════
+# TASK 9 — Analytics pace endpoint fix
+# Existing endpoint returns only pace_ratio. Dashboard also needs
+# estimated_minutes + actual_minutes for the full line chart.
+# Override it here — FastAPI uses the last registered route.
+# ══════════════════════════════════════════════════════════
+
+@app.get("/sessions/{session_id}/analytics/pace/detail")
+def analytics_pace_detail(session_id: str):
+    """
+    Full pace data per topic: name, estimated time, actual time, ratio, timestamp.
+    Used by the pace line chart on the dashboard analytics panel.
+    """
+    logs = supabase.table("pace_logs") \
+        .select("topic_id, estimated_minutes, actual_minutes, pace_ratio, completed_at, topics(name)") \
+        .eq("session_id", session_id) \
+        .order("completed_at") \
+        .execute().data
+
+    return [
+        {
+            "topic":             l["topics"]["name"] if l.get("topics") else l["topic_id"],
+            "estimated_minutes": l["estimated_minutes"],
+            "actual_minutes":    l["actual_minutes"],
+            "pace_ratio":        l["pace_ratio"],
+            "completed_at":      l["completed_at"],
+        }
+        for l in logs
+    ]
+
+
+# ══════════════════════════════════════════════════════════
+# TASK 10 — Schedule page
+# ══════════════════════════════════════════════════════════
+
+@app.get("/sessions/{session_id}/schedule")
+def get_schedule(session_id: str):
+    """
+    Compute a day-by-day study plan for remaining topics.
+    Spreads pending/in_progress topics across days until the deadline,
+    respecting sessions.hours_per_day if set (defaults to 6h/day).
+    """
+    from datetime import timedelta, date
+
+    session = supabase.table("sessions") \
+        .select("deadline, hours_per_day, title") \
+        .eq("id", session_id) \
+        .single() \
+        .execute().data
+
+    if not session:
+        raise HTTPException(404, "Session not found")
+
+    deadline = datetime.fromisoformat(session["deadline"].replace("Z", "+00:00"))
+    now = datetime.now(timezone.utc)
+    hours_per_day: float = float(session.get("hours_per_day") or 6)
+
+    # Days remaining (including today, at least 1)
+    days_left = max(1, (deadline.date() - now.date()).days + 1)
+
+    pending_topics = supabase.table("topics") \
+        .select("id, name, estimated_hours, priority_order, status") \
+        .eq("session_id", session_id) \
+        .in_("status", ["pending", "in_progress"]) \
+        .order("priority_order") \
+        .execute().data
+
+    if not pending_topics:
+        return {
+            "session_title": session["title"],
+            "days_left":     days_left,
+            "hours_per_day": hours_per_day,
+            "days":          [],
+            "message":       "No pending topics — all done or deferred.",
+        }
+
+    # Greedy bin-packing: fill each day up to hours_per_day
+    days: list[dict] = []
+    current_day_index = 0
+    current_day_hours = 0.0
+    current_day_topics: list[dict] = []
+
+    for topic in pending_topics:
+        est = float(topic["estimated_hours"] or 1)
+
+        # If this topic alone exceeds a full day, give it its own day anyway
+        if current_day_hours + est > hours_per_day and current_day_topics:
+            study_date = (now + timedelta(days=current_day_index)).strftime("%A, %b %-d")
+            days.append({
+                "day":           current_day_index + 1,
+                "date":          study_date,
+                "topics":        current_day_topics,
+                "planned_hours": round(current_day_hours, 1),
+            })
+            current_day_index += 1
+            current_day_hours = 0.0
+            current_day_topics = []
+
+        current_day_topics.append({
+            "id":              topic["id"],
+            "name":            topic["name"],
+            "estimated_hours": est,
+            "status":          topic["status"],
+        })
+        current_day_hours += est
+
+    # Flush the last day
+    if current_day_topics:
+        study_date = (now + timedelta(days=current_day_index)).strftime("%A, %b %-d")
+        days.append({
+            "day":           current_day_index + 1,
+            "date":          study_date,
+            "topics":        current_day_topics,
+            "planned_hours": round(current_day_hours, 1),
+        })
+
+    total_planned_days = len(days)
+    feasible = total_planned_days <= days_left
+
+    return {
+        "session_title":       session["title"],
+        "days_left":           days_left,
+        "hours_per_day":       hours_per_day,
+        "total_planned_days":  total_planned_days,
+        "feasible":            feasible,
+        "overrun_days":        max(0, total_planned_days - days_left),
+        "days":                days,
+        "message": (
+            f"On track — {total_planned_days} study days planned, {days_left} available."
+            if feasible else
+            f"Warning: {total_planned_days} days of work but only {days_left} days left."
+        ),
+    }
+
+
+class ScheduleLogBody(BaseModel):
+    topic_id:        str
+    actual_minutes:  int
+    scheduled_date:  str   # ISO date string e.g. "2026-06-30"
+
+
+@app.post("/sessions/{session_id}/schedule/log")
+def log_schedule_day(session_id: str, body: ScheduleLogBody):
+    """
+    Log actual time spent on a topic for a scheduled study day.
+    Reuses pace_logs with the new scheduled_date column.
+    Does NOT mark the topic done — that stays on PATCH /topics/{id}/complete.
+    """
+    topic = supabase.table("topics") \
+        .select("estimated_hours, status") \
+        .eq("id", body.topic_id) \
+        .eq("session_id", session_id) \
+        .single() \
+        .execute().data
+
+    if not topic:
+        raise HTTPException(404, "Topic not found in this session")
+
+    estimated_minutes = int(float(topic["estimated_hours"] or 1) * 60)
+    pace_ratio = round(body.actual_minutes / estimated_minutes, 3) if estimated_minutes else 1.0
+
+    supabase.table("pace_logs").insert({
+        "id":               str(uuid.uuid4()),
+        "topic_id":         body.topic_id,
+        "session_id":       session_id,
+        "estimated_minutes": estimated_minutes,
+        "actual_minutes":   body.actual_minutes,
+        "pace_ratio":       pace_ratio,
+        "scheduled_date":   body.scheduled_date,
+        "completed_at":     datetime.now(timezone.utc).isoformat(),
+    }).execute()
+
+    return {
+        "logged":             True,
+        "pace_ratio":         pace_ratio,
+        "scheduled_date":     body.scheduled_date,
+        "actual_minutes":     body.actual_minutes,
+        "estimated_minutes":  estimated_minutes,
+    }
+
 
 # ── run ──────────────────────────────────────────────────
 if __name__ == "__main__":
