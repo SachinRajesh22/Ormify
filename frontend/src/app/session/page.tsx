@@ -486,11 +486,11 @@ function DateTimePicker({ value, onChange }: { value: string; onChange: (v: stri
   }
 
   return (
-    <div ref={wrapRef}>
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+    <div ref={wrapRef} style={{ position: "relative", zIndex: calOpen ? 30 : 1 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
 
         {/* ── Date: text input + calendar icon ── */}
-        <div style={{ position: "relative", flex: 3 }}>
+        <div style={{ position: "relative", flex: "1 1 260px", minWidth: 0 }}>
           <div style={{
             display: "flex", alignItems: "center", overflow: "hidden",
             background: C.surface,
@@ -537,11 +537,11 @@ function DateTimePicker({ value, onChange }: { value: string; onChange: (v: stri
           {/* Calendar dropdown */}
           {calOpen && (
             <div style={{
-              position: "absolute", top: "calc(100% + 2px)", left: 0, zIndex: 200,
-              background: C.card, border: `1px solid ${C.border}`,
+              position: "absolute", top: "calc(100% + 2px)", left: 0, zIndex: 500,
+              background: C.bg, border: `1px solid ${C.border}`,
               borderRadius: 12, padding: "12px 14px 14px",
-              boxShadow: "0 12px 40px rgba(0,0,0,0.28)",
-              width: 270,
+              boxShadow: "0 18px 50px rgba(0,0,0,0.42)",
+              width: "min(270px, calc(100vw - 48px))",
             }}>
               {/* Month + Year selects */}
               <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
@@ -589,7 +589,7 @@ function DateTimePicker({ value, onChange }: { value: string; onChange: (v: stri
         </div>
 
         {/* ── Time: always-visible selects + AM/PM ── */}
-        <div style={{ flex: 2 }}>
+        <div style={{ flex: "1 1 230px", minWidth: 0 }}>
           <div style={{
             display: "flex", alignItems: "center", gap: 5,
             background: C.surface, border: `1px solid ${C.border}`,
@@ -649,7 +649,7 @@ function Step3({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Card>
+      <Card style={{ overflow: "visible", zIndex: 20 }}>
         <FieldLabel>Exam or submission deadline</FieldLabel>
         <DateTimePicker value={deadline} onChange={onDeadlineChange} />
       </Card>

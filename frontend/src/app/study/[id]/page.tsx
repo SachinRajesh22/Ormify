@@ -205,7 +205,7 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
     }
   }
 
-  const q = questions[current];
+  const q = questions?.[current];
   const isCorrect = revealed && selected !== null && selected === q?.correct_index;
 
   const scoreLabel =

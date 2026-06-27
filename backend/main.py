@@ -1060,7 +1060,8 @@ def get_schedule(session_id: str):
 
         # If this topic alone exceeds a full day, give it its own day anyway
         if current_day_hours + est > hours_per_day and current_day_topics:
-            study_date = (now + timedelta(days=current_day_index)).strftime("%A, %b %-d")
+            date_obj = now + timedelta(days=current_day_index)
+            study_date = f"{date_obj.strftime('%A, %b')} {date_obj.day}"
             days.append({
                 "day":           current_day_index + 1,
                 "date":          study_date,
