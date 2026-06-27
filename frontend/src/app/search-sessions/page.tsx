@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { API } from "../../lib/api";
 import { supabase } from "../../lib/supabase";
 
-type SessionStatus = "active" | "upcoming" | "completed";
+type SessionStatus = "active" | "behind" | "completed";
 
 interface RawTopic {
   id: string;
@@ -21,9 +21,10 @@ interface RawSession {
 
 function statusFor(session: RawSession): SessionStatus {
   const topics = session.topics ?? [];
-  const started = topics.some((topic) => topic.status === "in_progress" || topic.status === "done");
-  if (new Date(session.deadline) < new Date()) return "completed";
-  return started ? "active" : "upcoming";
+  const allDone = topics.length > 0 && topics.every(t => t.status === "done");
+  if (allDone) return "completed";
+  const isPast = new Date(session.deadline) < new Date();
+  return isPast ? "behind" : "active";
 }
 
 function formatDeadline(deadline: string) {
@@ -126,7 +127,11 @@ export default function SearchSessionsPage() {
                       <h2 className="truncate text-lg font-semibold">{session.title}</h2>
                       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Deadline: {formatDeadline(session.deadline)}</p>
                     </div>
-                    <span className="rounded-full bg-[#7B61FF]/10 px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#7B61FF]">
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${
+                      status === "behind"    ? "bg-red-500/10 text-red-500" :
+                      status === "completed" ? "bg-zinc-500/10 text-zinc-500" :
+                      "bg-[#7B61FF]/10 text-[#7B61FF]"
+                    }`}>
                       {status}
                     </span>
                   </div>

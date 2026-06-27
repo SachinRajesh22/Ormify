@@ -94,7 +94,7 @@ function formatTimer(seconds: number): string {
 
 function StatusBadge({ status }: { status: TopicStatus }) {
   const cfg: Record<TopicStatus, { label: string; cls: string }> = {
-    pending:     { label: "Pending",     cls: "bg-gray-100 text-gray-500" },
+    pending:     { label: "Pending",     cls: "bg-zinc-800 text-zinc-300" },
     in_progress: { label: "In Progress", cls: "bg-blue-100 text-blue-600" },
     done:        { label: "Done",        cls: "bg-emerald-100 text-emerald-700" },
     deferred:    { label: "Deferred",    cls: "bg-red-100 text-red-500" },
@@ -135,8 +135,27 @@ function PaceBar({ on_track }: { on_track: "green" | "amber" | "red" }) {
 }
 
 // ─── MCQ Depth Check Modal ───────────────────────────────────────────────────
-// Single API call → get 3 MCQ questions → user picks → instant scored result.
-// No open-text, no multi-round exchange — minimal tokens, fast UX.
+
+function loadMCQSettings() {
+  try {
+    const raw = localStorage.getItem("ormify-settings");
+    const parsed = raw ? JSON.parse(raw) : {};
+    return {
+      count: Math.max(1, Math.min(20, parseInt(parsed.questionsPerSession) || 3)),
+      hints: parsed.socraBotHints !== false,
+      difficulty: (parsed.difficulty as string) || "balanced",
+    };
+  } catch { return { count: 3, hints: true, difficulty: "balanced" }; }
+}
+
+function getScoreLabel(score: number, total: number) {
+  const pct = total > 0 ? score / total : 0;
+  const sub = `${score}/${total} correct`;
+  if (pct === 1)    return { cls: "bg-emerald-100 text-emerald-700", label: "Strong",   sub };
+  if (pct >= 0.67)  return { cls: "bg-amber-100 text-amber-700",    label: "Moderate", sub };
+  if (pct >= 0.33)  return { cls: "bg-orange-100 text-orange-700",  label: "Shaky",    sub };
+  return                   { cls: "bg-red-100 text-red-600",         label: "Weak",     sub };
+}
 
 interface MCQDepthCheckProps {
   topicId: string;
@@ -146,28 +165,42 @@ interface MCQDepthCheckProps {
 }
 
 function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCheckProps) {
+  const { count: qCount, hints: showHints, difficulty } = loadMCQSettings();
   const [phase, setPhase]             = useState<"loading" | "quiz" | "result">("loading");
   const [questions, setQuestions]     = useState<MCQQuestion[]>([]);
   const [current, setCurrent]         = useState(0);
   const [selected, setSelected]       = useState<number | null>(null);
   const [revealed, setRevealed]       = useState(false);
-  const [answers, setAnswers]         = useState<number[]>([]);   // chosen index per question
+  const [hintShown, setHintShown]     = useState(false);
+  const [answers, setAnswers]         = useState<number[]>([]);
   const [score, setScore]             = useState<number | null>(null);
-  const [error, setError]             = useState(false);
+  const [error, setError]             = useState<string | null>(null);
 
-  // Fetch all 3 MCQ questions in one shot on mount
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/topics/${topicId}/depth-check/mcq`, { method: "POST" })
-      .then(r => r.json())
+    fetch(`${API_BASE}/topics/${topicId}/depth-check/mcq?count=${qCount}&difficulty=${difficulty}`, { method: "POST" })
+      .then(async r => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({})) as { detail?: string };
+          if (r.status === 402) throw new Error("UPGRADE_REQUIRED:" + (body.detail ?? ""));
+          throw new Error(body.detail ?? `HTTP ${r.status}`);
+        }
+        return r.json()
+      })
       .then((data: MCQDepthResult) => {
         if (cancelled) return;
+        if (!data.questions?.length) throw new Error("No questions returned")
         setQuestions(data.questions);
         setPhase("quiz");
       })
-      .catch(() => { if (!cancelled) setError(true); });
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : "Could not load questions.";
+          setError(msg.startsWith("UPGRADE_REQUIRED:") ? "UPGRADE_REQUIRED" : msg);
+        }
+      });
     return () => { cancelled = true; };
-  }, [topicId]);
+  }, [topicId, qCount, difficulty]);
 
   function handleSelect(idx: number) {
     if (revealed) return;
@@ -177,6 +210,7 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
   function handleReveal() {
     if (selected === null) return;
     setRevealed(true);
+    setHintShown(false);
   }
 
   async function handleNext() {
@@ -188,32 +222,25 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
       setCurrent(c => c + 1);
       setSelected(null);
       setRevealed(false);
+      setHintShown(false);
     } else {
-      // All questions answered — compute score locally, save to backend
       const correctCount = nextAnswers.filter(
         (ans, i) => ans === questions[i].correct_index
       ).length;
       setScore(correctCount);
       setPhase("result");
-      // Save score (fire-and-forget, non-blocking)
       fetch(`${API_BASE}/topics/${topicId}/depth-check/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ score: correctCount, mode: "mcq" }),
-      }).catch(() => {/* silent */});
+      }).catch(() => {});
       onComplete?.(correctCount);
     }
   }
 
   const q = questions[current];
   const isCorrect = revealed && selected !== null && selected === q?.correct_index;
-
-  const scoreLabel =
-    score === null ? null
-    : score === 3 ? { cls: "bg-emerald-100 text-emerald-700", label: "Strong",  sub: "3/3 correct" }
-    : score === 2 ? { cls: "bg-amber-100 text-amber-700",   label: "Moderate", sub: "2/3 correct" }
-    : score === 1 ? { cls: "bg-orange-100 text-orange-700", label: "Shaky",    sub: "1/3 correct" }
-    :               { cls: "bg-red-100 text-red-600",       label: "Weak",     sub: "0/3 correct" };
+  const scoreLabel = score !== null ? getScoreLabel(score, questions.length) : null;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -255,9 +282,18 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
           {/* Error */}
           {error && (
             <div className="py-4 text-center space-y-3">
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                Could not load questions. Check your backend connection.
-              </p>
+              {error === "UPGRADE_REQUIRED" ? (
+                <>
+                  <p className="text-2xl">✦</p>
+                  <p className="text-sm font-semibold text-zinc-900 dark:text-white">Free plan limit reached</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">You&apos;ve used all your AI calls for today.<br/>Upgrade to Premium for unlimited access.</p>
+                  <a href="/upgrade" className="inline-block rounded-xl bg-[#7B61FF] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_0_16px_rgba(123,97,255,0.4)] hover:opacity-90 transition">
+                    Upgrade to Premium →
+                  </a>
+                </>
+              ) : (
+                <p className="text-sm text-gray-600 dark:text-gray-300">{error}</p>
+              )}
               <button
                 onClick={onClose}
                 className="text-sm text-purple-600 dark:text-purple-400 hover:underline"
@@ -311,6 +347,24 @@ function DepthCheckModal({ topicId, topicName, onClose, onComplete }: MCQDepthCh
                   );
                 })}
               </div>
+
+              {/* Hint (shown before reveal, only when hints enabled) */}
+              {showHints && !revealed && (
+                hintShown ? (
+                  <div className="rounded-xl bg-[#7B61FF]/10 border border-[#7B61FF]/20 px-4 py-3 text-sm text-[#b9adff] leading-relaxed">
+                    <span className="font-semibold text-[#7B61FF]">Hint: </span>
+                    {q.explanation}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setHintShown(true)}
+                    className="w-full rounded-xl border border-[#7B61FF]/30 bg-[#7B61FF]/8 py-2.5 text-sm text-[#7B61FF] dark:text-purple-300 transition hover:bg-[#7B61FF]/15"
+                  >
+                    Show hint
+                  </button>
+                )
+              )}
 
               {/* Explanation (shown after reveal) */}
               {revealed && (
@@ -750,7 +804,7 @@ export default function StudyPage() {
                           You must be able to explain
                         </p>
                         <ul className="space-y-1">
-                          {brief.must_explain.map((item, i) => (
+                          {(brief.must_explain ?? []).map((item, i) => (
                             <li key={i} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
                               <span className="text-purple-400 font-bold mt-0.5">·</span>
                               {item}
@@ -837,13 +891,13 @@ export default function StudyPage() {
                         ) : (
                           <>
                             <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed pt-1">{mat.overview}</p>
-                            {mat.key_points.length > 0 && (
+                            {(mat.key_points ?? []).length > 0 && (
                               <div>
                                 <p className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-gray-500 font-semibold mb-2">
                                   Key points
                                 </p>
                                 <ul className="space-y-1.5">
-                                  {mat.key_points.map((pt, i) => (
+                                  {(mat.key_points ?? []).map((pt, i) => (
                                     <li key={i} className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
                                       <span className="text-indigo-400 font-bold mt-0.5 flex-shrink-0">·</span>
                                       {pt}
@@ -862,13 +916,13 @@ export default function StudyPage() {
                                 </p>
                               </div>
                             )}
-                            {mat.examples.length > 0 && (
+                            {(mat.examples ?? []).length > 0 && (
                               <div className="bg-indigo-50 dark:bg-indigo-900/15 rounded-xl p-4">
                                 <p className="text-[10px] uppercase tracking-widest text-indigo-500 dark:text-indigo-400 font-semibold mb-2">
                                   Real-world examples
                                 </p>
                                 <ul className="space-y-1.5">
-                                  {mat.examples.map((ex, i) => (
+                                  {(mat.examples ?? []).map((ex, i) => (
                                     <li key={i} className="flex items-start gap-2 text-sm text-indigo-900 dark:text-indigo-200">
                                       <span className="font-bold text-indigo-400 flex-shrink-0">{i + 1}.</span>
                                       {ex}
@@ -877,13 +931,13 @@ export default function StudyPage() {
                                 </ul>
                               </div>
                             )}
-                            {mat.exam_focus.length > 0 && (
+                            {(mat.exam_focus ?? []).length > 0 && (
                               <div className="bg-emerald-50 dark:bg-emerald-900/15 rounded-xl p-4">
                                 <p className="text-[10px] uppercase tracking-widest text-emerald-600 dark:text-emerald-400 font-semibold mb-2">
                                   Exam focus
                                 </p>
                                 <ul className="space-y-1.5">
-                                  {mat.exam_focus.map((ef, i) => (
+                                  {(mat.exam_focus ?? []).map((ef, i) => (
                                     <li key={i} className="flex items-start gap-2 text-sm text-emerald-900 dark:text-emerald-200">
                                       <span className="text-emerald-500 font-bold flex-shrink-0">→</span>
                                       {ef}

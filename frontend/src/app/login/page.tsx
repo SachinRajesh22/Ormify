@@ -371,7 +371,7 @@ export default function LoginPage() {
 
         <section className="relative z-10 w-full max-w-md">
           <header className="mb-8 text-center">
-            <div className="mx-auto mb-4 h-14 w-14 rounded-full bg-[#7B61FF] shadow-[0_0_32px_rgba(123,97,255,0.75)]" />
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#7B61FF] text-2xl font-bold text-white shadow-[0_0_32px_rgba(123,97,255,0.75)]">O</div>
             <h1 className="text-4xl font-bold tracking-tight">Ormify</h1>
             <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-300">
               Plan it. Pace it. Know what you actually learned.

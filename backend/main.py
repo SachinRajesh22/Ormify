@@ -1,22 +1,51 @@
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
-from groq import Groq
+from groq import Groq, RateLimitError as GroqRateLimitError
 import chromadb
 import fitz  # PyMuPDF
 import uuid
 import os
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 import json
+import threading
+from apscheduler.schedulers.background import BackgroundScheduler
 
 load_dotenv()
 
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("ormify")
+
 app = FastAPI()
+scheduler = BackgroundScheduler(timezone="UTC")
+
+# ── Email config ──────────────────────────────────────────────
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+
+def _send_email(to: str, subject: str, html: str):
+    if not SMTP_USER or not SMTP_PASS:
+        raise RuntimeError("SMTP credentials not configured")
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = SMTP_USER
+    msg["To"]      = to
+    msg.attach(MIMEText(html, "html"))
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+        s.starttls()
+        s.login(SMTP_USER, SMTP_PASS)
+        s.sendmail(SMTP_USER, to, msg.as_string())
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,27 +57,130 @@ app.add_middleware(
 # ── clients ──────────────────────────────────────────────
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-GROQ_KEY     = os.environ["GROQ_API_KEY"]
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-_groq  = Groq(api_key=GROQ_KEY)
 _MODEL = "llama-3.3-70b-versatile"
+
+# ── Groq key pool ─────────────────────────────────────────
+# Support a comma-separated GROQ_API_KEYS env var (multi-key pool) or fall back
+# to the single GROQ_API_KEY.  All keys are tried round-robin; on rate limit
+# the next key is used automatically so the combined daily quota is shared.
+_raw_keys = os.environ.get("GROQ_API_KEYS", "")
+_GROQ_KEYS: list[str] = [k.strip() for k in _raw_keys.split(",") if k.strip()]
+if not _GROQ_KEYS:
+    single = os.environ.get("GROQ_API_KEY", "")
+    if single:
+        _GROQ_KEYS = [single]
+if not _GROQ_KEYS:
+    raise RuntimeError("Set GROQ_API_KEYS (comma-separated) or GROQ_API_KEY in .env")
+
+_key_index = 0
+_key_lock  = threading.Lock()
+
+
+# ── AI usage limits ───────────────────────────────────────
+FREE_DAILY_LIMIT = 20  # AI calls per day for free users
+
+def _get_user_id_for_topic(topic_id: str) -> str | None:
+    try:
+        t = supabase.table("topics").select("session_id").eq("id", topic_id).maybe_single().execute().data
+        if not t:
+            return None
+        s = supabase.table("sessions").select("user_id").eq("id", t["session_id"]).maybe_single().execute().data
+        return s["user_id"] if s else None
+    except Exception:
+        return None
+
+def _get_user_id_for_session(session_id: str) -> str | None:
+    try:
+        s = supabase.table("sessions").select("user_id").eq("id", session_id).maybe_single().execute().data
+        return s["user_id"] if s else None
+    except Exception:
+        return None
+
+def _check_ai_usage(user_id: str):
+    """Raises HTTP 402 if user has reached their daily AI call limit.
+    NOTE: Premium bypass is temporarily disabled until all Groq API keys are active.
+    """
+    from datetime import date
+    today = date.today().isoformat()
+    try:
+        prefs = supabase.table("user_preferences").select("*").eq("user_id", user_id).maybe_single().execute().data
+        is_premium = bool(prefs and prefs.get("is_premium"))
+        calls_today = (prefs.get("daily_ai_calls", 0) if prefs and prefs.get("ai_calls_date") == today else 0) if prefs else 0
+
+        if not is_premium and calls_today >= FREE_DAILY_LIMIT:
+            raise HTTPException(402, f"You've used all {FREE_DAILY_LIMIT} free AI calls for today. Upgrade to Ormify Premium for unlimited access.")
+
+        if prefs:
+            supabase.table("user_preferences").update({
+                "daily_ai_calls": calls_today + 1,
+                "ai_calls_date":  today,
+            }).eq("user_id", user_id).execute()
+        else:
+            supabase.table("user_preferences").insert({
+                "user_id":             user_id,
+                "daily_ai_calls":      1,
+                "ai_calls_date":       today,
+                "is_premium":          False,
+                "deadline_reminders":  False,
+                "daily_reminder":      False,
+                "streak_alerts":       False,
+            }).execute()
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # don't block AI features if usage tracking fails
+
+
+def _groq_keys_starting_here() -> list[str]:
+    """Return all keys in round-robin order starting from the next slot."""
+    global _key_index
+    with _key_lock:
+        start = _key_index % len(_GROQ_KEYS)
+        _key_index += 1
+    return _GROQ_KEYS[start:] + _GROQ_KEYS[:start]
+
+
+class _AIUnavailable(Exception):
+    """Raised when all Groq keys fail (rate limit, API error, or network)."""
+
 
 def _generate(prompt: str, system: str | None = None) -> str:
     msgs = ([{"role": "system", "content": system}] if system else []) + \
            [{"role": "user", "content": prompt}]
-    return _groq.chat.completions.create(model=_MODEL, messages=msgs).choices[0].message.content
+    last_err: Exception = _AIUnavailable("no keys configured")
+    for key in _groq_keys_starting_here():
+        try:
+            return Groq(api_key=key).chat.completions.create(model=_MODEL, messages=msgs).choices[0].message.content
+        except Exception as e:
+            last_err = e
+    raise _AIUnavailable(str(last_err))
+
 
 def _generate_json(prompt: str) -> str:
     msgs = [{"role": "user", "content": prompt}]
-    return _groq.chat.completions.create(
-        model=_MODEL, messages=msgs,
-        response_format={"type": "json_object"},
-    ).choices[0].message.content
+    last_err: Exception = _AIUnavailable("no keys configured")
+    for key in _groq_keys_starting_here():
+        try:
+            return Groq(api_key=key).chat.completions.create(
+                model=_MODEL, messages=msgs,
+                response_format={"type": "json_object"},
+            ).choices[0].message.content
+        except Exception as e:
+            last_err = e
+    raise _AIUnavailable(str(last_err))
+
 
 def _chat(history: list, system: str | None = None) -> str:
-    msgs = ([{"role": "system", "content": system}] if system else []) + history
-    return _groq.chat.completions.create(model=_MODEL, messages=msgs).choices[0].message.content
+    msgs = ([{"role": "system", "content": system}] + history) if system else history
+    last_err: Exception = _AIUnavailable("no keys configured")
+    for key in _groq_keys_starting_here():
+        try:
+            return Groq(api_key=key).chat.completions.create(model=_MODEL, messages=msgs).choices[0].message.content
+        except Exception as e:
+            last_err = e
+    raise _AIUnavailable(str(last_err))
 
 # chroma — persists to disk
 chroma_client = chromadb.PersistentClient(path="./chroma_store")
@@ -241,6 +373,9 @@ def _index_chunks_background(session_id: str, chunks: list[str]):
 
 @app.post("/sessions/{session_id}/parse-syllabus")
 async def parse_syllabus(session_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(None), raw_text: str = Form("")):
+    user_id = _get_user_id_for_session(session_id)
+    if user_id:
+        _check_ai_usage(user_id)
     try:
         # Step 1 — extract text
         if file:
@@ -317,8 +452,24 @@ Syllabus:
 
 @app.get("/topics/{topic_id}/study-material")
 def get_study_material(topic_id: str):
-    topic = supabase.table("topics").select("*").eq("id", topic_id).single().execute().data
-    session_data = supabase.table("sessions").select("raw_syllabus_text").eq("id", topic["session_id"]).single().execute().data
+    try:
+        user_id = _get_user_id_for_topic(topic_id)
+        if user_id:
+            _check_ai_usage(user_id)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    try:
+        topic = supabase.table("topics").select("*").eq("id", topic_id).maybe_single().execute().data
+    except Exception:
+        raise HTTPException(404, "Topic not found")
+    if not topic:
+        raise HTTPException(404, "Topic not found")
+    try:
+        session_data = supabase.table("sessions").select("raw_syllabus_text").eq("id", topic["session_id"]).maybe_single().execute().data or {}
+    except Exception:
+        session_data = {}
 
     # RAG chunks grounded in their actual syllabus
     chunks = retrieve_chunks(topic["session_id"], topic["name"], n=5)
@@ -367,7 +518,20 @@ Return ONLY valid JSON. No markdown fences."""
 
 @app.get("/topics/{topic_id}/challenge-brief")
 def get_challenge_brief(topic_id: str):
-    topic = supabase.table("topics").select("*").eq("id", topic_id).single().execute().data
+    try:
+        user_id = _get_user_id_for_topic(topic_id)
+        if user_id:
+            _check_ai_usage(user_id)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    try:
+        topic = supabase.table("topics").select("*").eq("id", topic_id).maybe_single().execute().data
+    except Exception:
+        raise HTTPException(404, "Topic not found")
+    if not topic:
+        raise HTTPException(404, "Topic not found")
 
     chunks = retrieve_chunks(topic["session_id"], topic["name"], n=3)
     context_block = ("\nRelevant syllabus content:\n" + "\n\n".join(chunks) + "\n") if chunks else ""
@@ -554,7 +718,7 @@ def _normalize_mcq_questions(raw: object) -> list[dict]:
         questions = []
 
     normalized = []
-    for q in questions[:3]:
+    for q in questions:
         if not isinstance(q, dict):
             continue
         options = q.get("options", [])
@@ -594,24 +758,51 @@ def get_depth_scores(session_id: str):
 
 
 @app.post("/topics/{topic_id}/depth-check/mcq")
-def depth_check_mcq(topic_id: str):
-    topic = supabase.table("topics").select("*").eq("id", topic_id).single().execute().data
+def depth_check_mcq(topic_id: str, count: int = 3, difficulty: str = "balanced"):
+    try:
+        user_id = _get_user_id_for_topic(topic_id)
+        if user_id:
+            _check_ai_usage(user_id)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    count = max(1, min(20, count))
+    difficulty = difficulty if difficulty in ("easy", "balanced", "hard") else "balanced"
+    try:
+        topic = supabase.table("topics").select("*").eq("id", topic_id).maybe_single().execute().data
+    except Exception:
+        raise HTTPException(404, "Topic not found")
     if not topic:
         raise HTTPException(404, "Topic not found")
 
-    prompt = f"""Generate 3 MCQ questions testing "{topic['name']}".
+    difficulty_note = {
+        "easy": "Make questions recall-based and straightforward — no tricks.",
+        "balanced": "Mix recall and application. Standard exam difficulty.",
+        "hard": "Focus on deep understanding, edge cases, and tricky distinctions.",
+    }[difficulty]
+
+    prompt = f"""Generate exactly {count} MCQ questions testing "{topic['name']}".
+Difficulty: {difficulty_note}
 Return ONLY JSON: {{"questions":[{{"question":"...","options":["A","B","C"],"correct_index":0,"explanation":"..."}}]}}
-No preamble. 3 options each. Concise."""
+Generate exactly {count} questions. 3 options each. No preamble."""
 
-    try:
-        questions = _normalize_mcq_questions(json.loads(_generate_json(prompt)))
-    except Exception as e:
-        raise HTTPException(500, f"MCQ generation failed: {e}")
+    best: list[dict] = []
+    for _ in range(3):
+        try:
+            qs = _normalize_mcq_questions(json.loads(_generate_json(prompt)))
+            if len(qs) > len(best):
+                best = qs
+            if len(best) >= count:
+                break
+        except (_AIUnavailable, Exception):
+            pass
 
-    if len(questions) != 3:
-        raise HTTPException(500, "MCQ generation returned invalid question data")
 
-    return {"questions": questions, "score": 0}
+    if not best:
+        raise HTTPException(500, "MCQ generation returned no questions after 3 attempts")
+
+    return {"questions": best[:count], "score": 0}
 
 
 @app.post("/topics/{topic_id}/depth-check/save")
@@ -639,6 +830,9 @@ def depth_check_save(topic_id: str, body: DepthCheckSave):
 
 @app.post("/topics/{topic_id}/depth-check/start")
 def depth_check_start(topic_id: str, body: DepthCheckStart):
+    user_id = _get_user_id_for_topic(topic_id)
+    if user_id:
+        _check_ai_usage(user_id)
     topic = supabase.table("topics").select("*").eq("id", topic_id).single().execute().data
     chunks = retrieve_chunks(topic["session_id"], f"{topic['name']} {body.student_explanation}")
     context = "\n\n".join(chunks) if chunks else "No curriculum context found."
@@ -658,6 +852,9 @@ def depth_check_start(topic_id: str, body: DepthCheckStart):
 
 @app.post("/topics/{topic_id}/depth-check/respond")
 def depth_check_respond(topic_id: str, body: DepthCheckRespond):
+    user_id = _get_user_id_for_topic(topic_id)
+    if user_id:
+        _check_ai_usage(user_id)
     topic = supabase.table("topics").select("*").eq("id", topic_id).single().execute().data
     next_level = body.current_level + 1
 
@@ -737,11 +934,25 @@ class BubbleChat(BaseModel):
 
 @app.post("/sessions/{session_id}/bubble/chat")
 def bubble_chat(session_id: str, body: BubbleChat):
-    ctx = get_session_context(session_id)
-    rag_chunks = retrieve_chunks(session_id, body.message)
-    rag_context = "\n\n".join(rag_chunks) if rag_chunks else ""
+    try:
+        user_id = _get_user_id_for_session(session_id)
+        if user_id:
+            _check_ai_usage(user_id)
 
-    system = f"""You are SocraBot, a sharp and honest study assistant built into a study app called Ormify.
+        ctx: dict = {}
+        try:
+            ctx = get_session_context(session_id)
+        except Exception:
+            ctx = {
+                "current_topic": None, "pace_ratio": 1.0,
+                "hours_remaining": 0, "projected_hours_needed": 0,
+                "on_track": "green", "deferred_count": 0, "deadline": None,
+            }
+
+        rag_chunks = retrieve_chunks(session_id, body.message)
+        rag_context = "\n\n".join(rag_chunks) if rag_chunks else ""
+
+        system = f"""You are SocraBot, a sharp and honest study assistant built into a study app called Ormify.
 You have real data about the student's session. Use it. Never be vague or generic.
 
 Session context:
@@ -757,24 +968,33 @@ Session context:
 Respond like a knowledgeable friend: direct, specific, honest. Use the session data above when relevant.
 If asked about a concept, explain it clearly. If asked about pace or planning, use the numbers above."""
 
-    history = body.conversation_history + [{"role": "user", "content": body.message}]
+        history = body.conversation_history + [{"role": "user", "content": body.message}]
 
-    reply = _chat(history, system)
-    history.append({"role": "assistant", "content": reply})
+        try:
+            reply = _chat(history, system)
+        except Exception:
+            reply = "I've hit my daily AI token limit — I'll be back once it resets (midnight UTC). In the meantime, keep studying and come back to me later!"
 
-    try:
-        supabase.table("bubble_chat_logs").insert({
-            "id": str(uuid.uuid4()),
-            "session_id": session_id,
-            "role": "assistant",
-            "content": reply,
-            "context_snapshot": json.dumps(ctx),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
-    except Exception:
-        pass  # logging is optional — don't fail the response
+        history.append({"role": "assistant", "content": reply})
 
-    return {"reply": reply, "conversation_history": history}
+        try:
+            supabase.table("bubble_chat_logs").insert({
+                "id": str(uuid.uuid4()),
+                "session_id": session_id,
+                "role": "assistant",
+                "content": reply,
+                "context_snapshot": json.dumps(ctx),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+        except Exception:
+            pass
+
+        return {"reply": reply, "conversation_history": history}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ══════════════════════════════════════════════════════════
@@ -1199,6 +1419,279 @@ def get_topic_videos(topic_id: str):
     ]
 
     return {"topic": topic["name"], "videos": videos}
+
+
+# ══════════════════════════════════════════════════════════
+# User preferences (notification settings stored in Supabase)
+# ══════════════════════════════════════════════════════════
+
+class PrefsBody(BaseModel):
+    email: str
+    deadline_reminders: bool = False
+    daily_reminder: bool = False
+    streak_alerts: bool = False
+
+@app.get("/users/{user_id}/preferences")
+def get_preferences(user_id: str):
+    row = supabase.table("user_preferences").select("*").eq("user_id", user_id).maybe_single().execute().data
+    if not row:
+        return {"deadline_reminders": False, "daily_reminder": False, "streak_alerts": False}
+    return {
+        "deadline_reminders": row["deadline_reminders"],
+        "daily_reminder":     row["daily_reminder"],
+        "streak_alerts":      row["streak_alerts"],
+    }
+
+@app.put("/users/{user_id}/preferences")
+def save_preferences(user_id: str, body: PrefsBody):
+    supabase.table("user_preferences").upsert({
+        "user_id":             user_id,
+        "email":               body.email,
+        "deadline_reminders":  body.deadline_reminders,
+        "daily_reminder":      body.daily_reminder,
+        "streak_alerts":       body.streak_alerts,
+        "updated_at":          datetime.now(timezone.utc).isoformat(),
+    }).execute()
+    return {"saved": True}
+
+
+# ══════════════════════════════════════════════════════════
+# Scheduler jobs — run automatically in the background
+# ══════════════════════════════════════════════════════════
+
+def _job_deadline_alerts():
+    """Every 6 h — email users with sessions due within 7 days."""
+    try:
+        rows = supabase.table("user_preferences").select("*").eq("deadline_reminders", True).execute().data or []
+        now  = datetime.now(timezone.utc)
+        for p in rows:
+            try:
+                sessions = supabase.table("sessions").select("title, deadline") \
+                    .eq("user_id", p["user_id"]).execute().data or []
+                upcoming = [
+                    s for s in sessions
+                    if (d := datetime.fromisoformat(s["deadline"].replace("Z", "+00:00"))) > now
+                    and (d - now).days <= 7
+                ]
+                if not upcoming:
+                    continue
+                rows_html = "".join(
+                    f"<li><b>{s['title']}</b> — due {s['deadline'][:10]} "
+                    f"({(datetime.fromisoformat(s['deadline'].replace('Z','+00:00')) - now).days}d left)</li>"
+                    for s in upcoming
+                )
+                html = (
+                    f"<h2 style='color:#7B61FF'>Upcoming Deadlines — Ormify</h2>"
+                    f"<p>You have sessions due within 7 days:</p><ul>{rows_html}</ul>"
+                    f"<p style='color:#888;font-size:12px'>Log into Ormify to keep studying.</p>"
+                )
+                _send_email(p["email"], "Ormify — Upcoming session deadlines", html)
+                log.info("Deadline alert sent to %s", p["email"])
+            except Exception as e:
+                log.warning("Deadline alert failed for %s: %s", p.get("email"), e)
+    except Exception as e:
+        log.error("_job_deadline_alerts error: %s", e)
+
+
+def _job_daily_reminders():
+    """Every day at 8 AM UTC — nudge users who have sessions."""
+    try:
+        rows = supabase.table("user_preferences").select("*").eq("daily_reminder", True).execute().data or []
+        for p in rows:
+            try:
+                sessions = supabase.table("sessions").select("title").eq("user_id", p["user_id"]).execute().data or []
+                count = len(sessions)
+                html  = (
+                    f"<h2 style='color:#7B61FF'>Daily Study Reminder — Ormify</h2>"
+                    f"<p>You have <b>{count}</b> session(s) waiting for you.</p>"
+                    f"<p>Log in and complete at least one topic today to stay on track!</p>"
+                    f"<p style='color:#888;font-size:12px'>You can turn this off in Ormify Settings → Notifications.</p>"
+                )
+                _send_email(p["email"], "Ormify — Your daily study reminder", html)
+                log.info("Daily reminder sent to %s", p["email"])
+            except Exception as e:
+                log.warning("Daily reminder failed for %s: %s", p.get("email"), e)
+    except Exception as e:
+        log.error("_job_daily_reminders error: %s", e)
+
+
+def _job_streak_alerts():
+    """Every day at 8 PM UTC — streak-risk reminder."""
+    try:
+        rows = supabase.table("user_preferences").select("*").eq("streak_alerts", True).execute().data or []
+        for p in rows:
+            try:
+                html = (
+                    f"<h2 style='color:#F59E0B'>Streak Alert — Ormify</h2>"
+                    f"<p>Your study streak is at risk! You haven't completed any topics today.</p>"
+                    f"<p>Log in and study at least one topic to keep your streak alive.</p>"
+                    f"<p style='color:#888;font-size:12px'>You can turn this off in Ormify Settings → Notifications.</p>"
+                )
+                _send_email(p["email"], "Ormify — Your streak is at risk", html)
+                log.info("Streak alert sent to %s", p["email"])
+            except Exception as e:
+                log.warning("Streak alert failed for %s: %s", p.get("email"), e)
+    except Exception as e:
+        log.error("_job_streak_alerts error: %s", e)
+
+
+@app.on_event("startup")
+def startup():
+    if SMTP_USER and SMTP_PASS:
+        scheduler.add_job(_job_deadline_alerts, "interval", hours=6,   id="deadline_alerts")
+        scheduler.add_job(_job_daily_reminders, "cron",  hour=8,  minute=0, id="daily_reminders")
+        scheduler.add_job(_job_streak_alerts,   "cron",  hour=20, minute=0, id="streak_alerts")
+        scheduler.start()
+        log.info("Notification scheduler started.")
+    else:
+        log.warning("SMTP_USER/SMTP_PASS not set — notification scheduler disabled.")
+
+@app.on_event("shutdown")
+def shutdown():
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+
+
+# ══════════════════════════════════════════════════════════
+# Notifications — email
+# ══════════════════════════════════════════════════════════
+
+class NotifyBody(BaseModel):
+    email: str
+    type: str  # "deadline_reminder" | "daily_reminder" | "streak_alert"
+
+@app.post("/users/{user_id}/notifications/send")
+def send_notification(user_id: str, body: NotifyBody):
+    sessions = supabase.table("sessions").select("title, deadline").eq("user_id", user_id).execute().data or []
+    now = datetime.now(timezone.utc)
+
+    if body.type == "deadline_reminder":
+        upcoming = [
+            s for s in sessions
+            if (d := datetime.fromisoformat(s["deadline"].replace("Z", "+00:00"))) > now
+            and (d - now).days <= 7
+        ]
+        if not upcoming:
+            rows = "".join(f"<li>{s['title']} — {s['deadline'][:10]}</li>" for s in sessions[:5]) or "<li>No active sessions</li>"
+            html = f"<h2>Your Ormify Sessions</h2><ul>{rows}</ul>"
+        else:
+            rows = "".join(
+                f"<li><b>{s['title']}</b> — due {s['deadline'][:10]} "
+                f"({(datetime.fromisoformat(s['deadline'].replace('Z','+00:00'))-now).days}d left)</li>"
+                for s in upcoming
+            )
+            html = f"<h2>Upcoming Deadlines</h2><p>You have sessions due within 7 days:</p><ul>{rows}</ul>"
+        subject = "Ormify — Upcoming session deadlines"
+
+    elif body.type == "daily_reminder":
+        count = len(sessions)
+        html = (
+            f"<h2>Daily Study Reminder</h2>"
+            f"<p>You have <b>{count}</b> session(s) in Ormify. Keep up your study streak today!</p>"
+        )
+        subject = "Ormify — Your daily study reminder"
+
+    elif body.type == "streak_alert":
+        html = (
+            "<h2>Streak Alert</h2>"
+            "<p>Don't forget to study today — your streak is at risk! Log into Ormify and complete at least one topic.</p>"
+        )
+        subject = "Ormify — Your streak is at risk"
+
+    else:
+        raise HTTPException(400, f"Unknown notification type: {body.type}")
+
+    try:
+        _send_email(body.email, subject, html)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Email send failed: {e}")
+
+    return {"sent": True, "type": body.type, "to": body.email}
+
+
+# ══════════════════════════════════════════════════════════
+# Settings — clear analytics / delete account
+# ══════════════════════════════════════════════════════════
+# Premium plan
+# ══════════════════════════════════════════════════════════
+
+@app.get("/users/{user_id}/ai-usage")
+def get_ai_usage(user_id: str):
+    from datetime import date
+    today = date.today().isoformat()
+    prefs = supabase.table("user_preferences").select("*").eq("user_id", user_id).maybe_single().execute().data
+    is_premium = bool(prefs and prefs.get("is_premium"))
+    calls_today = (prefs.get("daily_ai_calls", 0) if prefs and prefs.get("ai_calls_date") == today else 0) if prefs else 0
+    return {
+        "is_premium":  is_premium,
+        "calls_today": calls_today,
+        "limit":       None if is_premium else FREE_DAILY_LIMIT,
+    }
+
+
+@app.post("/users/{user_id}/upgrade")
+def upgrade_user(user_id: str):
+    try:
+        existing = supabase.table("user_preferences").select("user_id").eq("user_id", user_id).maybe_single().execute().data
+        if existing:
+            supabase.table("user_preferences").update({"is_premium": True}).eq("user_id", user_id).execute()
+        else:
+            supabase.table("user_preferences").insert({
+                "user_id":             user_id,
+                "is_premium":          True,
+                "deadline_reminders":  False,
+                "daily_reminder":      False,
+                "streak_alerts":       False,
+            }).execute()
+        return {"upgraded": True}
+    except Exception as e:
+        raise HTTPException(500, f"Upgrade failed: {e}")
+
+
+@app.post("/users/{user_id}/cancel-subscription")
+def cancel_subscription(user_id: str):
+    try:
+        existing = supabase.table("user_preferences").select("user_id").eq("user_id", user_id).maybe_single().execute().data
+        if existing:
+            supabase.table("user_preferences").update({"is_premium": False}).eq("user_id", user_id).execute()
+        return {"cancelled": True}
+    except Exception as e:
+        raise HTTPException(500, f"Cancellation failed: {e}")
+
+
+# ══════════════════════════════════════════════════════════
+
+@app.delete("/users/{user_id}/analytics")
+def clear_user_analytics(user_id: str):
+    """Delete all pace, defer, and depth-check records for this user's sessions."""
+    sessions = supabase.table("sessions").select("id").eq("user_id", user_id).execute().data
+    if not sessions:
+        return {"cleared": 0}
+
+    session_ids = [s["id"] for s in sessions]
+    supabase.table("pace_logs").delete().in_("session_id", session_ids).execute()
+    supabase.table("defer_logs").delete().in_("session_id", session_ids).execute()
+    supabase.table("depth_checks").delete().in_("session_id", session_ids).execute()
+    return {"cleared": len(session_ids)}
+
+
+@app.delete("/users/{user_id}")
+def delete_user_account(user_id: str):
+    """Permanently delete all user data and the Supabase auth account."""
+    sessions = supabase.table("sessions").select("id").eq("user_id", user_id).execute().data
+    session_ids = [s["id"] for s in sessions]
+
+    if session_ids:
+        supabase.table("pace_logs").delete().in_("session_id", session_ids).execute()
+        supabase.table("defer_logs").delete().in_("session_id", session_ids).execute()
+        supabase.table("depth_checks").delete().in_("session_id", session_ids).execute()
+        supabase.table("topics").delete().in_("session_id", session_ids).execute()
+        supabase.table("sessions").delete().eq("user_id", user_id).execute()
+
+    supabase.auth.admin.delete_user(user_id)
+    return {"deleted": user_id}
 
 
 if __name__ == "__main__":

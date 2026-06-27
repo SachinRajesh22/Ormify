@@ -66,6 +66,10 @@ export function SocraBotBubble({ sessionId }: { sessionId?: string | null }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: trimmed, conversation_history: messages }),
       });
+      if (res.status === 402) {
+        setMessages([...updated, { role: "assistant", content: "You've hit your free AI limit for today. Upgrade to Premium for unlimited access, or your calls reset at midnight UTC." }]);
+        return;
+      }
       if (!res.ok) throw new Error(`${res.status}`);
       const data = (await res.json()) as { reply?: string };
       setMessages([...updated, { role: "assistant", content: data.reply ?? "I could not generate a reply just now." }]);

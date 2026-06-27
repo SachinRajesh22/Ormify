@@ -10,6 +10,7 @@ import { API } from "../../lib/api"
 const C_DARK = {
   bg:        "#0D0D0F",
   card:      "rgba(20,20,22,0.88)",
+  solidCard: "#141416",
   surface:   "rgba(255,255,255,0.05)",
   border:    "rgba(16,207,168,0.34)",
   text:      "#EEEEF2",
@@ -24,6 +25,7 @@ const C_DARK = {
 const C_LIGHT = {
   bg:        "#F8FAFC",
   card:      "rgba(255,255,255,0.88)",
+  solidCard: "#ffffff",
   surface:   "rgba(255,255,255,0.78)",
   border:    "rgba(123,97,255,0.20)",
   text:      "#18181B",
@@ -538,7 +540,7 @@ function DateTimePicker({ value, onChange }: { value: string; onChange: (v: stri
           {calOpen && (
             <div style={{
               position: "absolute", top: "calc(100% + 2px)", left: 0, zIndex: 200,
-              background: C.card, border: `1px solid ${C.border}`,
+              background: C.solidCard, border: `1px solid ${C.border}`,
               borderRadius: 12, padding: "12px 14px 14px",
               boxShadow: "0 12px 40px rgba(0,0,0,0.28)",
               width: 270,
@@ -649,7 +651,7 @@ function Step3({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Card>
+      <Card style={{ overflow: "visible" }}>
         <FieldLabel>Exam or submission deadline</FieldLabel>
         <DateTimePicker value={deadline} onChange={onDeadlineChange} />
       </Card>

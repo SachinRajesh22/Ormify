@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ThemeToggle } from "../../components/ThemeToggle"
 import { API } from "../../lib/api"
+import { SettingsModal, loadOrmifySettings, OrmifySettings } from "../../components/SettingsModal"
 import { supabase } from "../../lib/supabase"
 import { useTheme } from "../../lib/theme"
 
@@ -17,7 +18,7 @@ const COLORS = {
   sidebar: "#0f0f0f",
 }
 
-type SessionStatus = "active" | "upcoming" | "completed"
+type SessionStatus = "active" | "behind" | "completed"
 
 interface StudySession {
   id: string
@@ -52,7 +53,8 @@ function mapSession(r: RawSession): StudySession {
   const done = topics.filter(t => t.status === "done").length
   const started = topics.filter(t => t.status === "in_progress" || t.status === "done").length
   const isPast = new Date(r.deadline) < new Date()
-  const status: SessionStatus = isPast ? "completed" : started > 0 ? "active" : "upcoming"
+  const allDone = total > 0 && done === total
+  const status: SessionStatus = allDone ? "completed" : isPast ? "behind" : "active"
 
   return {
     id: r.id,
@@ -83,7 +85,7 @@ function formatDeadline(deadline: string): string {
   })
 }
 
-function LineIcon({ name }: { name: "grid" | "search" | "chart" | "archive" | "calendar" | "plus" | "panel" | "logout" | "user" | "settings" | "help" | "spark" }) {
+function LineIcon({ name }: { name: "grid" | "search" | "chart" | "archive" | "calendar" | "plus" | "panel" | "logout" | "user" | "settings" | "help" | "spark" | "contrast" }) {
   const common = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const }
   const paths: Record<typeof name, React.ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
@@ -98,6 +100,7 @@ function LineIcon({ name }: { name: "grid" | "search" | "chart" | "archive" | "c
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1Z" /></>,
     help: <><circle cx="12" cy="12" r="10" /><path d="M9.5 9a2.5 2.5 0 0 1 4.8 1c0 2-2.3 2.2-2.3 4" /><path d="M12 17h.01" /></>,
     spark: <><path d="M12 2 15 9l7 3-7 3-3 7-3-7-7-3 7-3Z" /></>,
+    contrast: <><circle cx="12" cy="12" r="9" /><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18Z" /></>,
   }
   return <svg {...common}>{paths[name]}</svg>
 }
@@ -110,21 +113,27 @@ function SidebarItem({ icon, label, active = false, collapsed = false, onClick }
   onClick?: () => void
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={collapsed ? label : undefined}
-      className={`flex w-full items-center gap-3 rounded-lg border border-transparent text-left text-sm transition ${
-        collapsed ? "justify-center px-0 py-3" : "px-3 py-3"
-      } ${
-        active
-          ? "bg-zinc-200 text-zinc-950 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)] dark:bg-white/10 dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-          : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
-      }`}
-    >
-      <span className={active ? "text-zinc-950 dark:text-white" : "text-zinc-500"}>{icon}</span>
-      {!collapsed && <span className="truncate">{label}</span>}
-    </button>
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={onClick}
+        className={`flex w-full items-center gap-3 rounded-lg border border-transparent text-left text-sm transition ${
+          collapsed ? "justify-center p-3" : "px-3 py-3"
+        } ${
+          active
+            ? "bg-zinc-200 text-zinc-950 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)] dark:bg-white/10 dark:text-white dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+            : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
+        }`}
+      >
+        <span className={active ? "text-zinc-950 dark:text-white" : "text-zinc-500"}>{icon}</span>
+        {!collapsed && <span className="truncate">{label}</span>}
+      </button>
+      {collapsed && (
+        <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 dark:bg-zinc-700">
+          {label}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -200,7 +209,7 @@ function StatCard({ label, value, color, sub }: {
 function StatusBadge({ status }: { status: SessionStatus }) {
   const map: Record<SessionStatus, { label: string; color: string }> = {
     active:    { label: "Active",    color: COLORS.violet },
-    upcoming:  { label: "Upcoming",  color: COLORS.teal   },
+    behind:    { label: "Behind",    color: COLORS.red    },
     completed: { label: "Completed", color: "#8A8A9A"     },
   }
   const { label, color } = map[status]
@@ -214,9 +223,10 @@ function StatusBadge({ status }: { status: SessionStatus }) {
   )
 }
 
-function SessionCard({ session, now, onClick, onDelete }: {
+function SessionCard({ session, now, readinessThreshold, onClick, onDelete }: {
   session: StudySession
   now: number
+  readinessThreshold: number
   onClick: () => void
   onDelete: () => void
 }) {
@@ -241,10 +251,19 @@ function SessionCard({ session, now, onClick, onDelete }: {
             <StatusBadge status={session.status} />
           </div>
           <p className="text-xs text-zinc-500 dark:text-zinc-300">
-            Deadline: {session.status === "completed" ? "Completed" : `${days}d left, ${formatDeadline(session.deadline)}`}
+            {session.status === "completed" ? "Completed" :
+             session.status === "behind"    ? "Deadline passed" :
+             `${days}d left · ${formatDeadline(session.deadline)}`}
           </p>
         </header>
         <footer className="mt-5">
+          {session.readiness >= readinessThreshold && (
+            <div className="mb-2">
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-500">
+                ✓ Exam Ready
+              </span>
+            </div>
+          )}
           <div className="mb-2 flex items-center justify-between text-xs text-zinc-600 dark:text-zinc-300">
             <span>Readiness: {session.readiness}%</span>
             <span>{session.topicsDone}/{session.topicsTotal} topics</span>
@@ -403,11 +422,27 @@ export default function DashboardPage() {
   const [depthData, setDepthData] = useState<DepthPoint[]>([])
   const [weeklyCount,    setWeeklyCount]    = useState<number | null>(null)
   const [totalSessions,  setTotalSessions]  = useState<number | null>(null)
-  const [activeSessions, setActiveSessions] = useState<number | null>(null)
+  const [activeSessionCount, setActiveSessionCount] = useState<number | null>(null)
   const [loading, setLoading]       = useState(true)
   const [sessionsErr, setSessionsErr] = useState<string | null>(null)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sidebarOpen,         setSidebarOpen]         = useState(true)
+  const [deadlineBuffer,      setDeadlineBuffer]      = useState(1)
+  const [readinessThreshold,  setReadinessThreshold]  = useState(80)
+
+  useEffect(() => {
+    const s = loadOrmifySettings()
+    setSidebarOpen(s.sidebarExpanded)
+    setDeadlineBuffer(s.deadlineBuffer)
+    setReadinessThreshold(s.readinessThreshold)
+  }, [])
+
+  function refreshSettings(s: OrmifySettings) {
+    setDeadlineBuffer(s.deadlineBuffer)
+    setReadinessThreshold(s.readinessThreshold)
+    setSidebarOpen(s.sidebarExpanded)
+  }
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -438,7 +473,7 @@ export default function DashboardPage() {
             .then((d: { total_sessions: number; active_sessions: number } | null) => {
               if (d) {
                 setTotalSessions(d.total_sessions)
-                setActiveSessions(d.active_sessions)
+                setActiveSessionCount(d.active_sessions)
               }
             })
             .catch(() => {}),
@@ -493,7 +528,16 @@ export default function DashboardPage() {
   const topDeferredNames = deferData.slice(0, 3).map(d => d.topic)
 
   const displayEmail   = email ?? ""
-  const visibleSessions = sessions.slice(0, 8)
+  const urgentSessions   = sessions.filter(s => s.status === "active" && daysUntil(s.deadline, now) <= deadlineBuffer)
+  const activeSessions   = sessions.filter(s => s.status === "active" && daysUntil(s.deadline, now) > deadlineBuffer)
+  const behindSessions   = sessions.filter(s => s.status === "behind")
+  const completedSessions = sessions.filter(s => s.status === "completed")
+
+  async function handleDeleteSession(id: string, name: string) {
+    if (!confirm(`Delete "${name}"?`)) return
+    await fetch(`${API}/sessions/${id}`, { method: "DELETE" })
+    setSessions(prev => prev.filter(x => x.id !== id))
+  }
 
   return (
     <div className="flex min-h-screen bg-zinc-50 font-sans text-zinc-950 dark:bg-[#0D0D0F] dark:text-white">
@@ -505,7 +549,7 @@ export default function DashboardPage() {
         <header className={`flex h-20 items-center ${sidebarOpen ? "justify-between px-5" : "justify-center"}`}>
           {sidebarOpen && (
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-[#7B61FF] shadow-[0_0_22px_rgba(123,97,255,0.75)]" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#7B61FF] text-sm font-bold text-white shadow-[0_0_22px_rgba(123,97,255,0.75)]">O</div>
               <span className="text-lg font-bold tracking-tight text-zinc-950 dark:text-white">Ormify</span>
             </div>
           )}
@@ -519,7 +563,7 @@ export default function DashboardPage() {
           </button>
         </header>
 
-        <nav className="flex flex-col gap-1 px-3" aria-label="Dashboard navigation">
+        <nav className={`flex flex-col gap-1 ${sidebarOpen ? "px-3" : "px-2"}`} aria-label="Dashboard navigation">
           <SidebarItem icon={<LineIcon name="grid" />}     label="Dashboard"     active collapsed={!sidebarOpen} />
           <SidebarItem icon={<LineIcon name="search" />}   label="Search sessions" onClick={() => router.push("/search-sessions")} collapsed={!sidebarOpen} />
           <SidebarItem icon={<LineIcon name="chart" />}    label="Analytics"     onClick={() => setShowAnalytics(v => !v)} collapsed={!sidebarOpen} />
@@ -528,11 +572,11 @@ export default function DashboardPage() {
           <SidebarItem icon={<LineIcon name="plus" />}     label="New session"   onClick={() => router.push("/session")} collapsed={!sidebarOpen} />
         </nav>
 
-        {sidebarOpen && sessions.filter(s => s.status === "upcoming").length > 0 && (
+        {sidebarOpen && urgentSessions.length > 0 && (
           <section className="mt-6 px-4">
-            <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-600">Pinned</p>
+            <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-widest text-amber-500">⚡ Urgent</p>
             <div className="space-y-1">
-              {sessions.filter(s => s.status === "upcoming").slice(0, 3).map(s => (
+              {urgentSessions.slice(0, 3).map(s => (
                 <button
                   key={s.id}
                   type="button"
@@ -561,7 +605,7 @@ export default function DashboardPage() {
                 >
                   <p className="truncate text-sm text-zinc-700 dark:text-zinc-300">{s.name}</p>
                   <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-600">
-                    {s.status === "completed" ? "Completed" : `${daysUntil(s.deadline, now)}d left, ${s.topicsTotal} topics`}
+                    {s.status === "completed" ? "Completed" : s.status === "behind" ? "Deadline passed" : `${daysUntil(s.deadline, now)}d left, ${s.topicsTotal} topics`}
                   </p>
                 </button>
               ))}
@@ -573,9 +617,14 @@ export default function DashboardPage() {
           {profileOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
-              <div className="absolute bottom-full left-3 right-3 z-20 mb-2 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#1C1C1F]">
+              {/* Expanded sidebar: popup floats above footer; collapsed: popup floats to the right */}
+              <div className={`z-20 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#1C1C1F] ${
+                sidebarOpen
+                  ? "absolute bottom-full left-0 right-0 mb-2"
+                  : "fixed bottom-3 left-[4.5rem] w-60"
+              }`}>
                 <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-3 dark:border-white/10">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#7B61FF] text-sm font-bold text-white">
+                  <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#7B61FF] text-sm font-bold text-white">
                     {displayEmail[0]?.toUpperCase() ?? "U"}
                   </div>
                   <div className="min-w-0">
@@ -584,10 +633,11 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <PopupItem icon={<LineIcon name="user" />}     label="Profile" onClick={() => router.push("/profile")} />
-                <PopupItem icon={<LineIcon name="settings" />} label="Settings" />
-                <PopupItem icon={<LineIcon name="help" />}     label="Help" />
+                <PopupItem icon={<LineIcon name="settings" />} label="Settings" onClick={() => { setSettingsOpen(true); setProfileOpen(false) }} />
+                <PopupItem icon={<LineIcon name="help" />}     label="Help" onClick={() => router.push("/help")} />
+                <PopupItem icon={<LineIcon name="spark" />}    label="Upgrade to Premium" onClick={() => router.push("/upgrade")} />
                 <div className="flex items-center gap-3 px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
-                  <span className="opacity-70"><LineIcon name="spark" /></span>
+                  <span className="opacity-70"><LineIcon name="contrast" /></span>
                   <span className="flex-1">Theme</span>
                   <ThemeToggle />
                 </div>
@@ -603,26 +653,33 @@ export default function DashboardPage() {
             </>
           )}
 
-          <button
-            type="button"
-            onClick={() => setProfileOpen(v => !v)}
-            className={`flex w-full items-center rounded-xl transition hover:bg-zinc-100 dark:hover:bg-white/5 ${
-              sidebarOpen ? "gap-3 px-2 py-2 text-left" : "justify-center py-2"
-            }`}
-          >
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#7B61FF] text-sm font-bold text-white shadow-[0_0_18px_rgba(123,97,255,0.65)]">
-              {displayEmail[0]?.toUpperCase() ?? "U"}
-            </div>
-            {sidebarOpen && (
-              <>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-zinc-950 dark:text-white">Profile</p>
-                  <p className="truncate text-xs text-zinc-500">{displayEmail}</p>
-                </div>
-                <span className="text-zinc-400 dark:text-zinc-600">⌃</span>
-              </>
+          <div className="group relative">
+            <button
+              type="button"
+              onClick={() => setProfileOpen(v => !v)}
+              className={`flex w-full items-center rounded-xl transition hover:bg-zinc-100 dark:hover:bg-white/5 ${
+                sidebarOpen ? "gap-3 px-2 py-2 text-left" : "justify-center p-2"
+              }`}
+            >
+              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#7B61FF] text-sm font-bold text-white shadow-[0_0_18px_rgba(123,97,255,0.65)]">
+                {displayEmail[0]?.toUpperCase() ?? "U"}
+              </div>
+              {sidebarOpen && (
+                <>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-zinc-950 dark:text-white">Profile</p>
+                    <p className="truncate text-xs text-zinc-500">{displayEmail}</p>
+                  </div>
+                  <span className="text-zinc-400 dark:text-zinc-600">⌃</span>
+                </>
+              )}
+            </button>
+            {!sidebarOpen && (
+              <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-white opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 dark:bg-zinc-700">
+                Profile
+              </span>
             )}
-          </button>
+          </div>
         </footer>
       </aside>
 
@@ -649,7 +706,7 @@ export default function DashboardPage() {
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                 {totalSessions != null ? totalSessions : sessions.length} sessions
                 {" · "}
-                {activeSessions != null ? activeSessions : sessions.filter(s => s.status === "active").length} active
+                {activeSessionCount != null ? activeSessionCount : sessions.filter(s => s.status === "active").length} active
               </p>
             </div>
             <button
@@ -690,36 +747,87 @@ export default function DashboardPage() {
             />
           </section>
 
-          {/* ── Session cards ── */}
-          <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Active sessions">
-            {loading ? (
-              <NeonCard accent={COLORS.violet} className="col-span-full">
-                <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">Loading sessions...</p>
-              </NeonCard>
-            ) : sessionsErr ? (
-              <NeonCard accent={COLORS.red} className="col-span-full">
-                <p className="py-8 text-center text-sm text-red-500">Could not load sessions: {sessionsErr}</p>
-              </NeonCard>
-            ) : visibleSessions.length === 0 ? (
-              <NeonCard accent={COLORS.teal} className="col-span-full">
-                <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">No sessions yet. Create one above.</p>
-              </NeonCard>
-            ) : (
-              visibleSessions.map(s => (
-                <SessionCard
-                  key={s.id}
-                  session={s}
-                  now={now}
-                  onClick={() => router.push(`/study/${s.id}`)}
-                  onDelete={async () => {
-                    if (!confirm(`Delete "${s.name}"?`)) return
-                    await fetch(`${API}/sessions/${s.id}`, { method: "DELETE" })
-                    setSessions(prev => prev.filter(x => x.id !== s.id))
-                  }}
-                />
-              ))
-            )}
-          </section>
+          {/* ── Session sections ── */}
+          {loading ? (
+            <NeonCard accent={COLORS.violet} className="mb-6">
+              <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">Loading sessions...</p>
+            </NeonCard>
+          ) : sessionsErr ? (
+            <NeonCard accent={COLORS.red} className="mb-6">
+              <p className="py-8 text-center text-sm text-red-500">Could not load sessions: {sessionsErr}</p>
+            </NeonCard>
+          ) : sessions.length === 0 ? (
+            <NeonCard accent={COLORS.teal} className="mb-6">
+              <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">No sessions yet. Create one above.</p>
+            </NeonCard>
+          ) : (
+            <div className="mb-6 space-y-6">
+              {/* ⚡ Urgent */}
+              {urgentSessions.length > 0 && (
+                <div>
+                  <div className="mb-3 flex items-center gap-3">
+                    <span className="text-xs font-bold uppercase tracking-widest text-amber-500">⚡ Urgent · {urgentSessions.length}</span>
+                    <div className="h-px flex-1 bg-amber-500/20" />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    {urgentSessions.map(s => (
+                      <SessionCard key={s.id} session={s} now={now} readinessThreshold={readinessThreshold}
+                        onClick={() => router.push(`/study/${s.id}`)}
+                        onDelete={() => handleDeleteSession(s.id, s.name)} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Active */}
+              {activeSessions.length > 0 && (
+                <div>
+                  <div className="mb-3 flex items-center gap-3">
+                    <span className="text-xs font-bold uppercase tracking-widest text-[#7B61FF]">Active · {activeSessions.length}</span>
+                    <div className="h-px flex-1 bg-[#7B61FF]/20" />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    {activeSessions.map(s => (
+                      <SessionCard key={s.id} session={s} now={now} readinessThreshold={readinessThreshold}
+                        onClick={() => router.push(`/study/${s.id}`)}
+                        onDelete={() => handleDeleteSession(s.id, s.name)} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Behind */}
+              {behindSessions.length > 0 && (
+                <div>
+                  <div className="mb-3 flex items-center gap-3">
+                    <span className="text-xs font-bold uppercase tracking-widest text-red-500">Behind · {behindSessions.length}</span>
+                    <div className="h-px flex-1 bg-red-500/20" />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    {behindSessions.map(s => (
+                      <SessionCard key={s.id} session={s} now={now} readinessThreshold={readinessThreshold}
+                        onClick={() => router.push(`/study/${s.id}`)}
+                        onDelete={() => handleDeleteSession(s.id, s.name)} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Completed — all topics done */}
+              {completedSessions.length > 0 && (
+                <div>
+                  <div className="mb-3 flex items-center gap-3">
+                    <span className="text-xs font-bold uppercase tracking-widest text-zinc-500">Completed · {completedSessions.length}</span>
+                    <div className="h-px flex-1 bg-zinc-500/20" />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    {completedSessions.map(s => (
+                      <SessionCard key={s.id} session={s} now={now} readinessThreshold={readinessThreshold}
+                        onClick={() => router.push(`/study/${s.id}`)}
+                        onDelete={() => handleDeleteSession(s.id, s.name)} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Analytics ── */}
           <section aria-label="Learning analytics" className="space-y-4">
@@ -767,6 +875,14 @@ export default function DashboardPage() {
           </section>
         </div>
       </main>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        userEmail={displayEmail}
+        onSidebarDefaultChange={setSidebarOpen}
+        onSettingsChange={refreshSettings}
+      />
     </div>
   )
 }
