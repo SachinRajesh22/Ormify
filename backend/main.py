@@ -1789,7 +1789,8 @@ def delete_user_account(user_id: str):
     supabase.auth.admin.delete_user(user_id)
     return {"deleted": user_id}
 
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+import os
+import uvicorn
+if _name_ == "_main_":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
