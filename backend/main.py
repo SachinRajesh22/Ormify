@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from typing import Optional
 import json
 import threading
+import urllib.request
+import urllib.parse
 from apscheduler.schedulers.background import BackgroundScheduler
 
 load_dotenv()
@@ -267,10 +269,91 @@ def remaining_projected_hours(session_id: str, deadline_str: str) -> dict:
 # TASK 1 — Session Setup & Syllabus Parser
 # ══════════════════════════════════════════════════════════
 
+class SignupBody(BaseModel):
+    email: str
+    password: str
+
 class SessionCreate(BaseModel):
     title: str
     deadline: str  # ISO datetime string
     user_id: str
+
+
+import urllib.error as _urlerr
+
+
+def _raw_admin(method: str, path: str, payload: dict | None = None) -> dict:
+    """Direct HTTP call to GoTrue admin API using the service role key."""
+    data = json.dumps(payload).encode() if payload else None
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/auth/v1/admin/{path}",
+        data=data,
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+        },
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read())
+    except _urlerr.HTTPError as e:
+        body = e.read().decode()
+        raise RuntimeError(f"HTTP {e.code}: {body}")
+
+
+@app.post("/auth/signup")
+def signup(body: SignupBody):
+    errors: list[str] = []
+
+    # ── Attempt 1: admin create_user ──────────────────────────────
+    try:
+        res = supabase.auth.admin.create_user({
+            "email": body.email,
+            "password": body.password,
+            "email_confirm": True,
+        })
+        if res.user:
+            log.info("signup: created user %s", res.user.id)
+            return {"user_id": res.user.id, "email": res.user.email}
+        errors.append("create_user: returned no user")
+    except Exception as e:
+        errors.append(f"create_user: {e}")
+        log.warning("signup attempt 1 failed: %s", e)
+
+    # ── Attempt 2: find existing user, update password + confirm ──
+    try:
+        data = _raw_admin("GET", f"users?filter={urllib.parse.quote(body.email)}&page=1&per_page=1000")
+        users = data.get("users", [])
+        log.info("signup: found %d users matching filter", len(users))
+        existing = next((u for u in users if u.get("email") == body.email), None)
+        if existing:
+            uid = existing["id"]
+            log.info("signup: updating existing user %s", uid)
+            _raw_admin("PUT", f"users/{uid}", {"password": body.password, "email_confirm": True})
+            return {"user_id": uid, "email": existing["email"]}
+        errors.append("find: no user found with that email")
+    except Exception as e:
+        errors.append(f"find+update: {e}")
+        log.warning("signup attempt 2 failed: %s", e)
+
+    # ── Attempt 3: invite_user_by_email (different GoTrue path) ───
+    try:
+        inv = supabase.auth.admin.invite_user_by_email(body.email)
+        uid = inv.user.id
+        log.info("signup: invited user %s, updating password", uid)
+        supabase.auth.admin.update_user_by_id(uid, {
+            "password": body.password,
+            "email_confirm": True,
+        })
+        return {"user_id": uid, "email": body.email}
+    except Exception as e:
+        errors.append(f"invite: {e}")
+        log.warning("signup attempt 3 failed: %s", e)
+
+    log.error("signup: all attempts failed: %s", errors)
+    raise HTTPException(status_code=400, detail=" | ".join(errors))
 
 
 @app.post("/sessions")

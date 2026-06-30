@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase";
+import { API } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
 
 // ── Animation constants ───────────────────────────────────────
@@ -255,12 +256,30 @@ export default function LoginPage() {
         if (error) throw error;
         router.push("/dashboard");
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setMessage("Check your email to confirm your account, then log in.");
+        // Route signup through backend (service-role key, auto-confirms email)
+        const res = await fetch(`${API}/auth/signup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(json.detail || "Signup failed. Please try again.");
+        }
+        // Account created — now sign in so the user gets a session
+        const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password });
+        if (loginErr) throw loginErr;
+        router.push("/dashboard");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      console.error("Auth error:", err);
+      const e = err as Record<string, unknown>;
+      const rawMsg = (e?.message as string) ?? "";
+      const status = e?.status as number | undefined;
+      const code = e?.code as string | undefined;
+      const detail = [code, status ? `HTTP ${status}` : ""].filter(Boolean).join(" · ");
+      const msg = rawMsg && rawMsg !== "{}" ? rawMsg : "Something went wrong. Please try again.";
+      setError(detail ? `${msg} (${detail})` : msg);
     } finally {
       setLoading(false);
     }
