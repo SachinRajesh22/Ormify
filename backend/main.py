@@ -303,6 +303,17 @@ def _raw_admin(method: str, path: str, payload: dict | None = None) -> dict:
         raise RuntimeError(f"HTTP {e.code}: {body}")
 
 
+def _ensure_public_user(uid: str, email: str):
+    """Insert into public.users if not already present (mirrors dropped trigger)."""
+    existing = supabase.table("users").select("id").eq("id", uid).maybe_single().execute().data
+    if not existing:
+        supabase.table("users").insert({
+            "id": uid,
+            "email": email,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+
+
 @app.post("/auth/signup")
 def signup(body: SignupBody):
     errors: list[str] = []
@@ -316,6 +327,7 @@ def signup(body: SignupBody):
         })
         if res.user:
             log.info("signup: created user %s", res.user.id)
+            _ensure_public_user(res.user.id, body.email)
             return {"user_id": res.user.id, "email": res.user.email}
         errors.append("create_user: returned no user")
     except Exception as e:
@@ -326,12 +338,12 @@ def signup(body: SignupBody):
     try:
         data = _raw_admin("GET", f"users?filter={urllib.parse.quote(body.email)}&page=1&per_page=1000")
         users = data.get("users", [])
-        log.info("signup: found %d users matching filter", len(users))
         existing = next((u for u in users if u.get("email") == body.email), None)
         if existing:
             uid = existing["id"]
             log.info("signup: updating existing user %s", uid)
             _raw_admin("PUT", f"users/{uid}", {"password": body.password, "email_confirm": True})
+            _ensure_public_user(uid, body.email)
             return {"user_id": uid, "email": existing["email"]}
         errors.append("find: no user found with that email")
     except Exception as e:
@@ -347,6 +359,7 @@ def signup(body: SignupBody):
             "password": body.password,
             "email_confirm": True,
         })
+        _ensure_public_user(uid, body.email)
         return {"user_id": uid, "email": body.email}
     except Exception as e:
         errors.append(f"invite: {e}")
